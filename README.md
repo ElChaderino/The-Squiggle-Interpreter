@@ -57,7 +57,15 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
 - **Clinical Metrics and Detailed Reports**  
   Integrates site-specific clinical metrics (such as percentage change in Alpha power and Theta/Beta ratio) and generates comprehensive HTML reports with interactive dropdowns and detailed plots.
 
-
+![Global Topos](https://github.com/user-attachments/assets/b587d432-8edd-4bdf-b0f9-e04a640ebbbf)
+![Global Waveforms](https://github.com/user-attachments/assets/692cf5dd-6809-41c9-a684-97c0b083f20a)
+![Global Coherence](https://github.com/user-attachments/assets/e05c84ac-70ff-4736-b261-2c91d335b4de)
+![Global ERP](https://github.com/user-attachments/assets/263b8f33-07af-4b73-8675-a87ff074f46b)
+![zScore Maps](https://github.com/user-attachments/assets/67a877ae-9938-4317-8bc6-67ff202ad66d)
+![Time Frequency Representation Map](https://github.com/user-attachments/assets/4c335ae7-fbed-4f8c-a06b-0a4cb6a8da39)
+![ICA Components](https://github.com/user-attachments/assets/27db1e83-75a8-480b-8f5b-8d1bb8f5be57)
+![Loreta](https://github.com/user-attachments/assets/aff2c1d6-87b4-4115-a1a1-c7f9ae970714)
+![Per Site](https://github.com/user-attachments/assets/270870c5-9fca-4979-bc33-738c4bd48a09)
 
 ## Architecture and Modules
 
