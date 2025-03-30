@@ -224,8 +224,11 @@ EL Chaderino/VocalARR – Creator & Maintainer
 GitHub Profile
 
 References
+
 Technical and Methodological References
+
 MNE-Python and EEG Analysis
+
 Gramfort, A., Luessi, M., Larson, E., Engemann, D. A., Strohmeier, D., Brodbeck, C., … & Hämäläinen, M. S. (2013). MEG and EEG data analysis with MNE-Python. Frontiers in Neuroscience, 7, 267.
 Provides the backbone for signal processing, source localization, and visualization routines using the MNE-Python toolbox.
 
