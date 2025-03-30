@@ -66,8 +66,14 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
 ![ICA Components](https://github.com/user-attachments/assets/27db1e83-75a8-480b-8f5b-8d1bb8f5be57)
 ![Loreta](https://github.com/user-attachments/assets/aff2c1d6-87b4-4115-a1a1-c7f9ae970714)
 ![Per Site](https://github.com/user-attachments/assets/270870c5-9fca-4979-bc33-738c4bd48a09)
-https://youtu.be/2CinwFa5OXo concept scripts
-https://youtu.be/os_8XX3V8sk Batch Run old version
+
+old concept scripts in action
+
+[![EDF -older version concept scripts](https://img.youtube.com/vi/2CinwFa5OXo/0.jpg)](https://www.youtube.com/watch?v=2CinwFa5OXo "-older version concept scripts")
+
+old batch run in action
+
+[![EDF Batch run -older version](https://img.youtube.com/vi/os_8XX3V8sk/0.jpg)](https://www.youtube.com/watch?v=os_8XX3V8sk "EDF Batch run -older version")
 
 ## Architecture and Modules
 
