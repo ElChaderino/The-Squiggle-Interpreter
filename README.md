@@ -252,25 +252,33 @@ Niedermeyer, E., & da Silva, F. L. (2005). Electroencephalography: Basic Princip
 A key resource for standard EEG montages, frequency bands, and clinical applications.
 
 Clinical and Quantitative EEG (qEEG) References
+
 Paul Swingle
+
 Swingle, P. (2003). Clinical EEG: An Analysis Paradigm for the Modern Era. Journal of Clinical Neurophysiology, 20(4), 250–260.
 Provides insights into modern EEG interpretation that guided the clinical analysis components.
 
 Gary Ames
+
 Ames, G. (1999). Advances in EEG Signal Interpretation and Clinical Applications. Clinical EEG and Neuroscience, 30(2), 123–134.
 Influenced the development of band power and coherence metrics.
 
 Jay Gunkleman
+
 Gunkleman, J. (2001). Quantitative EEG: Guidelines and Applications in Clinical Practice. EEG Clinical Reviews, 15(1), 45–58.
 Provides a clinical framework for quantitative EEG, shaping our topomap and z-score generation.
 
 Sebern Fisher
+
 Fisher, S. (2005). Standardizing EEG Analysis in Clinical Settings: Challenges and Solutions. Journal of Neurodiagnostic Techniques, 17(3), 220–230.
 Influenced our preprocessing and standardization protocols.
 
 Cohen, Cowan, and Budsinky
+
 Cohen, S., Cowan, R., & Budsinky, A. (2007). Integration of Quantitative EEG and Clinical Neurophysiology: A Comprehensive Approach. Neurophysiology Clinics, 18(4), 500–512.
 Illustrates the integration of quantitative metrics with clinical neurophysiology—a core philosophy behind this platform.
+
+and many many many more that are on the way to the list... 
 
 The Squiggle Interpreter is designed to be a transparent, community-driven tool. Its open-source nature ensures that users have full access to the underlying algorithms, enabling validation, modification, and extension to suit individual clinical or research needs.
 
