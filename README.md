@@ -143,9 +143,10 @@ pandas: For handling clinical metrics and CSV outputs.
 
 ### Installation Steps
 quick and dirty windows install
+
 Install Python:
-Download and install Python 3.x (I used Python 3.10) from:
-https://www.python.org/downloads/
+Download and install Python 3.x (I used Python 3.10) 
+from: https://www.python.org/downloads/
 
 Download the Project:
 Download the project ZIP file from GitHub and extract the folder to your desktop.
@@ -163,6 +164,9 @@ If you see errors about missing packages, install them by running:
  
   pip install mne numpy matplotlib rich jinja2 antropy nolds pandas scipy
 
+  once installed run in cmd python main.py and sit back once its done open outputs folder and do to the html report at the bottom of the output folder
+
+![beta2](https://github.com/user-attachments/assets/edb7898b-656f-41ff-a529-e30320fbfad5)
 
 
 1. **Clone the Repository:**
