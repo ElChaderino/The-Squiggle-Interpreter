@@ -142,6 +142,28 @@ pandas: For handling clinical metrics and CSV outputs.
 
 
 ### Installation Steps
+quick and dirty windows install
+Install Python:
+Download and install Python 3.x (I used Python 3.10) from:
+https://www.python.org/downloads/
+
+Download the Project:
+Download the project ZIP file from GitHub and extract the folder to your desktop.
+
+Prepare Your EDF Files:
+Place your EDF files into the project folder. Make sure the filenames include "eo" (or "EO") for Eyes Open and "ec" (or "EC") for Eyes Closed.
+
+Run the Project:
+Open the Command Prompt, navigate (cd) to the project folder, and run:
+  
+  python main.py
+
+Install Missing Packages:
+If you see errors about missing packages, install them by running:
+ 
+  pip install mne numpy matplotlib rich jinja2 antropy nolds pandas scipy
+
+
 
 1. **Clone the Repository:**
 
