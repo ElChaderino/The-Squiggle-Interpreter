@@ -1,3 +1,5 @@
+GNU Terry Pratchett
+
 Please note this is not a finished project and it still has a lot of refining and cleaning up as well as expanding to be done. there is a live feedback system thats in the process of being integrated into the Squiggle Interpreter as well as a Report generator that was in the early build. any ideas on what else to add are always welcome and I hope this is of use to those who are interested in this sort of thing. 
 
 # The Squiggle Interpreter
@@ -217,7 +219,7 @@ Submit a Pull Request with a detailed explanation of your changes.
 Follow the Code Style Guidelines as outlined in our CONTRIBUTING.md (if available).
 
 License
-This project is licensed under the MIT License. Use, modify, and distribute this software with proper attribution.
+This project is licensed under the GNU/GPL 3 License. Use, modify, and distribute this software with proper attribution.
 
 Authors
 EL Chaderino/VocalARR – Creator & Maintainer
