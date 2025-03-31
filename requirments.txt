@@ -1,0 +1,9 @@
+mne
+numpy
+scipy
+matplotlib
+jinja2
+rich
+nolds
+antropy
+pandas
