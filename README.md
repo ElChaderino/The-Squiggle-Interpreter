@@ -58,22 +58,22 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
 
 - **Clinical Metrics and Detailed Reports**  
   Integrates site-specific clinical metrics (such as percentage change in Alpha power and Theta/Beta ratio) and generates comprehensive HTML reports with interactive dropdowns and detailed plots.
+![Global Topos](https://github.com/user-attachments/assets/43e1a449-70c7-4fb9-a101-12e44c90137a)
+![Global Waveforms](https://github.com/user-attachments/assets/39999f29-ceef-4eac-81c7-464736080481)
+![Global Coherence](https://github.com/user-attachments/assets/973fb5f2-1469-44dd-8329-337193601a6f)
+![Global ERP](https://github.com/user-attachments/assets/2fb74228-323b-4bc2-9c0f-c575ec95f06e)
+![zScore Maps](https://github.com/user-attachments/assets/2555fd08-7cee-4eb5-9153-38c62cdb0c62)
+![Time Frequency Representation Map](https://github.com/user-attachments/assets/ce07f228-e791-4841-b551-03e9fc9d969d)
+![ICA Components](https://github.com/user-attachments/assets/57954ad2-0fba-4cb9-9bee-bafbb8443a19)
+![Loreta](https://github.com/user-attachments/assets/d7ff2947-15ac-4c23-bb2f-dd48088e9cac)
+![PerSite PSD and Plot](https://github.com/user-attachments/assets/499084db-cf93-42d6-83ed-542d500250fa)
 
-![Global Topos](https://github.com/user-attachments/assets/b587d432-8edd-4bdf-b0f9-e04a640ebbbf)
-![Global Waveforms](https://github.com/user-attachments/assets/692cf5dd-6809-41c9-a684-97c0b083f20a)
-![Global Coherence](https://github.com/user-attachments/assets/e05c84ac-70ff-4736-b261-2c91d335b4de)
-![Global ERP](https://github.com/user-attachments/assets/263b8f33-07af-4b73-8675-a87ff074f46b)
-![zScore Maps](https://github.com/user-attachments/assets/67a877ae-9938-4317-8bc6-67ff202ad66d)
-![Time Frequency Representation Map](https://github.com/user-attachments/assets/4c335ae7-fbed-4f8c-a06b-0a4cb6a8da39)
-![ICA Components](https://github.com/user-attachments/assets/27db1e83-75a8-480b-8f5b-8d1bb8f5be57)
-![Loreta](https://github.com/user-attachments/assets/aff2c1d6-87b4-4115-a1a1-c7f9ae970714)
-![Per Site](https://github.com/user-attachments/assets/270870c5-9fca-4979-bc33-738c4bd48a09)
 
-old concept scripts in action
+Video old concept scripts in action
 
 [![EDF -older version concept scripts](https://img.youtube.com/vi/2CinwFa5OXo/0.jpg)](https://www.youtube.com/watch?v=2CinwFa5OXo "-older version concept scripts")
 
-old batch run in action
+Video old batch run in action
 
 [![EDF Batch run -older version](https://img.youtube.com/vi/os_8XX3V8sk/0.jpg)](https://www.youtube.com/watch?v=os_8XX3V8sk "EDF Batch run -older version")
 
