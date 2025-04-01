@@ -25,7 +25,6 @@ def find_subject_edf_files(directory):
     subjects = {}
     for f in edf_files:
         f_lower = f.lower()
-        # Assume subject id is the first two characters (adjust as needed)
         subject_id = f_lower[:2]
         if subject_id not in subjects:
             subjects[subject_id] = {"EO": None, "EC": None}
@@ -71,6 +70,14 @@ def main():
     overall_output_dir = os.path.join(project_dir, "outputs")
     os.makedirs(overall_output_dir, exist_ok=True)
     
+    # Ask user if they want to use CSD for graphing only.
+    csd_choice = input("Use current source density (CSD) for graphs only? (y/n, default n in 5 sec): ")
+    if csd_choice.lower() == "y":
+        use_csd_for_graphs = True
+    else:
+        use_csd_for_graphs = False
+    print(f"Using CSD for graphs: {use_csd_for_graphs}")
+    
     # --- Batch processing: Group EDF files by subject ---
     subject_edf_groups = find_subject_edf_files(project_dir)
     print("Found subject EDF files:", subject_edf_groups)
@@ -109,8 +116,30 @@ def main():
         ec_file = files["EC"] if files["EC"] else files["EO"]
         print(f"Subject {subject}: EO file: {eo_file}, EC file: {ec_file}")
         
-        raw_eo = io_utils.load_eeg_data(eo_file)
-        raw_ec = io_utils.load_eeg_data(ec_file)
+        # Load data without CSD for forward/inverse modeling.
+        raw_eo = io_utils.load_eeg_data(os.path.join(project_dir, eo_file), use_csd=False)
+        raw_ec = io_utils.load_eeg_data(os.path.join(project_dir, ec_file), use_csd=False)
+        print("Loaded data for subject", subject)
+        
+        # Create CSD copies for graphing if requested.
+        if use_csd_for_graphs:
+            raw_eo_csd = raw_eo.copy().load_data()
+            raw_ec_csd = raw_ec.copy().load_data()
+            try:
+                raw_eo_csd = mne.preprocessing.compute_current_source_density(raw_eo_csd)
+                print("CSD applied for graphs (EO).")
+            except Exception as e:
+                print("CSD for graphs (EO) failed:", e)
+                raw_eo_csd = raw_eo  # fallback
+            try:
+                raw_ec_csd = mne.preprocessing.compute_current_source_density(raw_ec_csd)
+                print("CSD applied for graphs (EC).")
+            except Exception as e:
+                print("CSD for graphs (EC) failed:", e)
+                raw_ec_csd = raw_ec  # fallback
+        else:
+            raw_eo_csd = raw_eo
+            raw_ec_csd = raw_ec
         
         bp_eo = processing.compute_all_band_powers(raw_eo)
         bp_ec = processing.compute_all_band_powers(raw_ec)
@@ -258,6 +287,14 @@ def main():
         print(f"Subject {subject}: Saved ICA EO to {ica_path}")
         
         # --- Global Source Localization ---
+        # Create separate copies for source localization to avoid custom reference issues.
+        raw_source_eo = raw_eo.copy()
+        raw_source_ec = raw_ec.copy()
+        # Permanently re-reference the source copies (without projections).
+        raw_source_eo.set_eeg_reference("average", projection=False)
+        raw_source_ec.set_eeg_reference("average", projection=False)
+        print("EEG channels for source localization (EO):", mne.pick_types(raw_source_eo.info, meg=False, eeg=True))
+        
         fs_dir = mne.datasets.fetch_fsaverage(verbose=True)
         subjects_dir = os.path.dirname(fs_dir)
         subject_fs = "fsaverage"
@@ -266,9 +303,9 @@ def main():
         bem_model = mne.make_bem_model(subject=subject_fs, ico=4, conductivity=conductivity, subjects_dir=subjects_dir)
         bem_solution = mne.make_bem_solution(bem_model)
         
-        fwd_eo = mne.make_forward_solution(raw_eo.info, trans="fsaverage", src=src,
+        fwd_eo = mne.make_forward_solution(raw_source_eo.info, trans="fsaverage", src=src,
                                            bem=bem_solution, eeg=True, meg=False, verbose=False)
-        fwd_ec = mne.make_forward_solution(raw_ec.info, trans="fsaverage", src=src,
+        fwd_ec = mne.make_forward_solution(raw_source_ec.info, trans="fsaverage", src=src,
                                            bem=bem_solution, eeg=True, meg=False, verbose=False)
         
         events_eo = mne.make_fixed_length_events(raw_eo, duration=2.0)
@@ -276,10 +313,10 @@ def main():
                                 preload=True, verbose=False)
         cov_eo = mne.compute_covariance(epochs_eo, tmax=0., method="empirical", verbose=False)
         
-        inv_op_eo = processing.compute_inverse_operator(raw_eo, fwd_eo, cov_eo)
-        inv_op_ec = processing.compute_inverse_operator(raw_ec, fwd_ec, cov_eo)  # Using EO covariance
+        inv_op_eo = processing.compute_inverse_operator(raw_source_eo, fwd_eo, cov_eo)
+        inv_op_ec = processing.compute_inverse_operator(raw_source_ec, fwd_ec, cov_eo)  # Using EO covariance
         
-        source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eLORETA"}
+        source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eloreta"}
         source_localization = {"EO": {}, "EC": {}}
         for cond, raw_data, inv_op in [("EO", raw_eo, inv_op_eo), ("EC", raw_ec, inv_op_ec)]:
             for band in band_list:
@@ -299,13 +336,11 @@ def main():
                         src_path = os.path.join(cond_folder, src_filename)
                         fig_src.savefig(src_path, dpi=150, bbox_inches="tight", facecolor="black")
                         plt.close(fig_src)
-                        # Build the relative path: e.g., "EO/source_EO_MNE_Alpha.png"
                         source_localization[cond].setdefault(band, {})[method] = cond + "/" + src_filename
                         print(f"Subject {subject}: Saved {method} source localization for {cond} {band} to {src_path}")
                     except Exception as e:
                         print(f"Error computing source localization for {cond} {band} with {method}: {e}")
         
-        # Print the source localization dictionary for verification
         print("Source Localization dictionary:")
         print(source_localization)
         
@@ -323,7 +358,6 @@ def main():
                 wave_path = os.path.join("detailed_site_plots", site, "Waveform_Overlay", f"{site}_Waveform_{b}.png")
                 site_dict[site][b] = {"psd": psd_path, "wave": wave_path}
         
-        # --- Build report_data dictionary for the HTML report ---
         report_data = {
             "global_topomaps": {
                 "EO": {b: os.path.basename(os.path.join(folders["topomaps_eo"], f"topomap_{b}.png")) for b in band_list},
