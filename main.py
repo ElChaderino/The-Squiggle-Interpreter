@@ -8,7 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mne
 
-from modules import io_utils, processing, plotting, report, clinical
+from modules.vigilance import plot_vigilance_hypnogram
+from modules import io_utils, processing, plotting, report, clinical, vigilance
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -72,10 +73,7 @@ def main():
     
     # Ask user if they want to use CSD for graphing only.
     csd_choice = input("Use current source density (CSD) for graphs only? (y/n, default n in 5 sec): ")
-    if csd_choice.lower() == "y":
-        use_csd_for_graphs = True
-    else:
-        use_csd_for_graphs = False
+    use_csd_for_graphs = True if csd_choice.lower() == "y" else False
     print(f"Using CSD for graphs: {use_csd_for_graphs}")
     
     # --- Batch processing: Group EDF files by subject ---
@@ -101,7 +99,8 @@ def main():
             "tfr_ec": os.path.join(subject_folder, "tfr", "EC"),
             "ica_eo": os.path.join(subject_folder, "ica", "EO"),
             "source": os.path.join(subject_folder, "source_localization"),
-            "detailed": os.path.join(subject_folder, "detailed_site_plots")
+            "detailed": os.path.join(subject_folder, "detailed_site_plots"),
+            "vigilance": os.path.join(subject_folder, "vigilance")
         }
         for folder in folders.values():
             os.makedirs(folder, exist_ok=True)
@@ -141,6 +140,42 @@ def main():
             raw_eo_csd = raw_eo
             raw_ec_csd = raw_ec
         
+        # --- Integrate Vigilance Module ---
+        # Use a 2-second epoch (to allow a longer filter transition band)
+        vigilance_states = vigilance.compute_vigilance_states(raw_eo, epoch_length=2.0)
+
+        # Plot the hypnogram and save it without displaying
+        fig = vigilance.plot_vigilance_hypnogram(vigilance_states, epoch_length=2.0)
+        hypno_path = os.path.join(folders["vigilance"], "vigilance_hypnogram.png")
+        fig.savefig(hypno_path, facecolor='black')
+        plt.close(fig)
+        print(f"Saved vigilance hypnogram to {hypno_path}")
+
+
+        print("Vigilance states (time in s, stage):")
+        for t, stage in vigilance_states:
+            print(f"{t:5.1f}s: {stage}")
+
+        # Plot and save the original color vigilance strip (if needed)
+        fig_strip = vigilance.plot_vigilance_strip(vigilance_states, epoch_length=2.0)
+        vigilance_strip_path = os.path.join(folders["vigilance"], "vigilance_strip.png")
+        fig_strip.savefig(vigilance_strip_path, facecolor='black')
+        plt.close(fig_strip)
+        print(f"Saved vigilance strip to {vigilance_strip_path}")
+
+        
+        # --- New: Plot a step-style hypnogram ---
+        # (Make sure that modules.vigilance has the function plot_vigilance_hypnogram)
+        try:
+            fig_hypno = vigilance.plot_vigilance_hypnogram(vigilance_states, epoch_length=2.0)
+            vigilance_hypno_path = os.path.join(folders["vigilance"], "vigilance_hypnogram.png")
+            fig_hypno.savefig(vigilance_hypno_path, facecolor='black')
+            plt.close(fig_hypno)
+            print(f"Saved vigilance hypnogram to {vigilance_hypno_path}")
+        except AttributeError:
+            print("Error: 'plot_vigilance_hypnogram' not found in modules.vigilance. Please update the vigilance module accordingly.")
+        
+        # Continue with existing processing...
         bp_eo = processing.compute_all_band_powers(raw_eo)
         bp_ec = processing.compute_all_band_powers(raw_ec)
         print(f"Subject {subject} - Computed band powers for EO channels:", list(bp_eo.keys()))
@@ -287,10 +322,8 @@ def main():
         print(f"Subject {subject}: Saved ICA EO to {ica_path}")
         
         # --- Global Source Localization ---
-        # Create separate copies for source localization to avoid custom reference issues.
         raw_source_eo = raw_eo.copy()
         raw_source_ec = raw_ec.copy()
-        # Permanently re-reference the source copies (without projections).
         raw_source_eo.set_eeg_reference("average", projection=False)
         raw_source_ec.set_eeg_reference("average", projection=False)
         print("EEG channels for source localization (EO):", mne.pick_types(raw_source_eo.info, meg=False, eeg=True))
@@ -314,7 +347,7 @@ def main():
         cov_eo = mne.compute_covariance(epochs_eo, tmax=0., method="empirical", verbose=False)
         
         inv_op_eo = processing.compute_inverse_operator(raw_source_eo, fwd_eo, cov_eo)
-        inv_op_ec = processing.compute_inverse_operator(raw_source_ec, fwd_ec, cov_eo)  # Using EO covariance
+        inv_op_ec = processing.compute_inverse_operator(raw_source_ec, fwd_ec, cov_eo)
         
         source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eloreta"}
         source_localization = {"EO": {}, "EC": {}}
