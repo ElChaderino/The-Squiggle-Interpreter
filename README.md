@@ -1,6 +1,6 @@
 GNU Terry Pratchett
 
-Please note this is not a finished project and it still has a lot of refining and cleaning up as well as expanding to be done. there is a live feedback system thats in the process of being integrated into the Squiggle Interpreter as well as a Report generator that was in the early build. any ideas on what else to add are always welcome and I hope this is of use to those who are interested in this sort of thing. 
+Please note this is not a finished project and it still has a lot of refining and cleaning up as well as expanding to be done. there is a live feedback system thats in the process of being integrated into the Squiggle Interpreter as well as a Report generator that was in the early build. any ideas on what else to add are always welcome and I hope this is of use to those who are interested in this sort of thing.  
 
 # The Squiggle Interpreter
 
@@ -58,6 +58,43 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
 
 - **Clinical Metrics and Detailed Reports**  
   Integrates site-specific clinical metrics (such as percentage change in Alpha power and Theta/Beta ratio) and generates comprehensive HTML reports with interactive dropdowns and detailed plots.
+
+  **Recent Updates**
+
+Vigilance Module (Inspired by Jay Gunkleman)
+
+Classifies vigilance levels using Alpha/Theta ratios
+
+Graphical output in both hypnogram and colored strip formats
+
+Integrated into clinical report for visual attention fluctuation tracking
+
+CSD (Current Source Density) Support
+
+Optional application of surface Laplacian via MNE's CSD module
+
+Enables sharper topographic interpretations
+
+Can be toggled in preprocessing phase (for graphing only)
+
+CDA Preparation and Execution
+
+Signal split architecture enables data handling for both Source Localization and CDA
+
+CDA-compatible output for direct comparison of regional activation changes
+
+Built to support future implementations for canonical discriminant analysis (CDA) classifiers
+
+Data Handling and Source Localization
+
+Preprocessing pipeline now includes conditional referencing logic for forward model support
+
+Ensures compatibility with inverse operators (LORETA variants)
+
+Generates both condition-specific and global visualizations for brain mapping
+
+
+
 ![Global Topos](https://github.com/user-attachments/assets/43e1a449-70c7-4fb9-a101-12e44c90137a)
 ![Global Waveforms](https://github.com/user-attachments/assets/39999f29-ceef-4eac-81c7-464736080481)
 ![Global Coherence](https://github.com/user-attachments/assets/973fb5f2-1469-44dd-8329-337193601a6f)
@@ -144,6 +181,8 @@ pandas: For handling clinical metrics and CSV outputs.
 ### Installation Steps
 quick and dirty windows install
 
+simply downoad the zip extract the folder to you desktop and then double click on the setup.bat and then follow along from the prepare you files and run in cmd in the project directory python main.py
+
 Install Python:
 Download and install Python 3.x (I used Python 3.10) 
 from: https://www.python.org/downloads/
@@ -168,38 +207,40 @@ If you see errors about missing packages, install them by running:
 
 ![beta2](https://github.com/user-attachments/assets/edb7898b-656f-41ff-a529-e30320fbfad5)
 
+Installation and Setup for Linux and Mac
 
-1. **Clone the Repository:**
+Prerequisites
 
-   ```bash
-   git clone https://github.com/yourusername/the-squiggle-interpreter.git
-   cd the-squiggle-interpreter
-Create a Virtual Environment (optional but recommended):
+Python 3.10
 
-bash
-Copy
+MNE, NumPy, SciPy, Matplotlib, Jinja2, Rich, Nolds, Antropy, Pandas
+
+Quick Setup (Windows)
+
+python -m pip install mne numpy matplotlib rich jinja2 antropy nolds pandas scipy
+python main.py
+
+Recommended Setup (Virtual Environment)
+
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-Install Dependencies:
-
-bash
-Copy
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-If a requirements.txt file is not provided, install manually:
+python main.py
 
-bash
-Copy
-pip install mne numpy scipy matplotlib jinja2 rich nolds antropy
+Linux/macOS Setup
 
-Set Up Data:
-Place your EDF files in the repository root (or adjust the paths accordingly). The tool automatically scans for files following the naming convention (e.g., c1eo.edf, c1ec.edf).
+Run the provided setup script:
+
+chmod +x setup.sh
+./setup.sh
 
 Usage
-Run the main script to process your EEG data:
 
-bash
-Copy
-python main.py
+Place EDF files in the root directory (following naming conventions e.g., subjecteo.edf, subjectec.edf)
+
+Execute main.py for automatic EEG processing and interactive report generation
+
+
 
 This script will:
 
@@ -232,17 +273,16 @@ Community-Driven:
 Contributions are encouraged. Whether adding new features, improving documentation, or optimizing performance, the platform is designed to evolve through community involvement.
 
 Contributing
-Contributions to The Squiggle Interpreter are welcome! Please follow these steps:
 
-Fork the Repository.
+We encourage and welcome contributions:
 
-Create a New Branch for your feature or bugfix.
+Fork the repository
 
-Commit Your Changes with clear, descriptive messages.
+Create a branch for your feature or fix
 
-Submit a Pull Request with a detailed explanation of your changes.
+Commit with descriptive messages
 
-Follow the Code Style Guidelines as outlined in our CONTRIBUTING.md (if available).
+Submit a detailed pull request
 
 License
 This project is licensed under the GNU/GPL 3 License. Use, modify, and distribute this software with proper attribution.
@@ -257,54 +297,39 @@ Technical and Methodological References
 
 MNE-Python and EEG Analysis
 
-Gramfort, A., Luessi, M., Larson, E., Engemann, D. A., Strohmeier, D., Brodbeck, C., … & Hämäläinen, M. S. (2013). MEG and EEG data analysis with MNE-Python. Frontiers in Neuroscience, 7, 267.
-Provides the backbone for signal processing, source localization, and visualization routines using the MNE-Python toolbox.
+MNE-Python and EEG Analysis:
 
-LORETA, sLORETA, and eLORETA
+Gramfort, A., Luessi, M., Larson, E., Engemann, D. A., Strohmeier, D., Brodbeck, C., & Hämäläinen, M. S. (2013). MEG and EEG data analysis with MNE-Python. Frontiers in Neuroscience, 7, 267.
 
-Pascual-Marqui, R. D. (1994). Low resolution electromagnetic tomography: a new method for localizing electrical activity in the brain. International Journal of Psychophysiology, 18(1), 49–65.
+LORETA, sLORETA, and eLORETA:
 
-Pascual-Marqui, R. D. (2002). Standardized low resolution brain electromagnetic tomography (sLORETA): technical details. Methods and Findings in Experimental and Clinical Pharmacology, 24(Suppl D), 5–12.
-Describe the inverse solution methods used for source localization in the platform.
+Pascual-Marqui, R. D. (1994). Low resolution electromagnetic tomography. International Journal of Psychophysiology, 18(1), 49–65.
 
-Time–Frequency Analysis
+Pascual-Marqui, R. D. (2002). Standardized low resolution brain electromagnetic tomography (sLORETA). Methods and Findings in Experimental and Clinical Pharmacology, 24(Suppl D), 5–12.
+
+Time–Frequency Analysis:
+
 Cohen, M. X. (2014). Analyzing Neural Time Series Data: Theory and Practice. MIT Press.
-Offers theoretical and practical guidance for TFR analysis using Morlet wavelets.
 
-Independent Component Analysis (ICA) in EEG
-Delorme, A., & Makeig, S. (2004). EEGLAB: an open source toolbox for analysis of single-trial EEG dynamics including independent component analysis. Journal of Neuroscience Methods, 134(1), 9–21.
-Provides background for ICA methods, complementing our MNE-Python implementation.
+Independent Component Analysis (ICA) in EEG:
 
-General EEG and Neurophysiology Standards
-Niedermeyer, E., & da Silva, F. L. (2005). Electroencephalography: Basic Principles, Clinical Applications, and Related Fields (5th ed.). Lippincott Williams & Wilkins.
-A key resource for standard EEG montages, frequency bands, and clinical applications.
+Delorme, A., & Makeig, S. (2004). EEGLAB. Journal of Neuroscience Methods, 134(1), 9–21.
 
-Clinical and Quantitative EEG (qEEG) References
+General EEG and Neurophysiology Standards:
 
-Paul Swingle
+Niedermeyer, E., & da Silva, F. L. (2005). Electroencephalography: Basic Principles, Clinical Applications. Lippincott Williams & Wilkins.
 
-Swingle, P. (2003). Clinical EEG: An Analysis Paradigm for the Modern Era. Journal of Clinical Neurophysiology, 20(4), 250–260.
-Provides insights into modern EEG interpretation that guided the clinical analysis components.
+Clinical and Quantitative EEG (qEEG) References:
 
-Gary Ames
+Swingle, P. (2003). Clinical EEG analysis. Journal of Clinical Neurophysiology, 20(4), 250–260.
 
-Ames, G. (1999). Advances in EEG Signal Interpretation and Clinical Applications. Clinical EEG and Neuroscience, 30(2), 123–134.
-Influenced the development of band power and coherence metrics.
+Ames, G. (1999). EEG signal interpretation. Clinical EEG and Neuroscience, 30(2), 123–134.
 
-Jay Gunkleman
+Gunkelman, J. (2001). qEEG guidelines. EEG Clinical Reviews, 15(1), 45–58.
 
-Gunkleman, J. (2001). Quantitative EEG: Guidelines and Applications in Clinical Practice. EEG Clinical Reviews, 15(1), 45–58.
-Provides a clinical framework for quantitative EEG, shaping our topomap and z-score generation.
+Fisher, S. (2005). EEG standardization challenges. Journal of Neurodiagnostic Techniques, 17(3), 220–230.
 
-Sebern Fisher
-
-Fisher, S. (2005). Standardizing EEG Analysis in Clinical Settings: Challenges and Solutions. Journal of Neurodiagnostic Techniques, 17(3), 220–230.
-Influenced our preprocessing and standardization protocols.
-
-Cohen, Cowan, and Budsinky
-
-Cohen, S., Cowan, R., & Budsinky, A. (2007). Integration of Quantitative EEG and Clinical Neurophysiology: A Comprehensive Approach. Neurophysiology Clinics, 18(4), 500–512.
-Illustrates the integration of quantitative metrics with clinical neurophysiology—a core philosophy behind this platform.
+Budzynski, T. H., Budzynski, H. K., Evans, J. R., & Abarbanel, A. (2009). Introduction to Quantitative EEG and Neurofeedback: Advanced Theory and Applications (2nd ed.). Academic Press.
 
 and many many many more that are on the way to the list... 
 
