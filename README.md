@@ -25,44 +25,9 @@ Please note this is not a finished project and it still has a lot of refining an
 - [References](#references)
 
 
-
 ## Overview
 
 The Squiggle Interpreter is built to analyze EEG data in EDF format and generate a wide array of visual and quantitative outputs. It integrates advanced signal processing techniques with state-of-the-art source localization, time-frequency analysis, and clinical metrics computation. By providing a modular design and detailed logging, the tool serves as a transparent "glass-box" platform that can be audited, enhanced, and integrated with other tools.
-
-
-
-## Key Features
-
-- **EEG Data Grouping and Preprocessing**  
-  Scans directories for EDF files and groups them by subject and condition (EO/EC). It applies standard montages and references to ensure consistency.
-
-- **Band Power Analysis**  
-  Computes both absolute and relative power across standard frequency bands (Delta, Theta, Alpha, SMR, Beta, HighBeta).
-
-- **Topographic Mapping**  
-  Generates global topomaps for each frequency band, displaying both absolute and relative power. Visualizations are styled for dark mode and publication-quality display.
-
-- **Waveform and ERP Visualization**  
-  Creates waveform grids and pseudo-ERP plots to visualize signal dynamics.
-
-- **Coherence and Z-Score Analysis**  
-  Provides methods for generating coherence matrices and robust z-score topomaps for clinical evaluation.
-
-- **Time-Frequency Representation (TFR)**  
-  Computes TFRs using Morlet wavelets to analyze the spectral content over time.
-
-- **ICA Components Visualization**  
-  Plots independent components extracted from EEG data to aid in artifact rejection and component analysis.
-
-- **Source Localization**  
-  Uses forward and inverse modeling (LORETA, sLORETA, and eLORETA) for source localization and visualizes these on 3D brain surfaces.
-
-- **Vigilance Detection**  
-  Provides epoch-level vigilance classification based on Alpha/Theta power ratios. Outputs include hypnogram-style visualizations and colored vigilance strips to represent arousal states (A1–C). Useful for assessing fatigue, attention regulation, insomnia patterns, and pre-sleep transitions. All plots are optimized for dark mode and suitable for clinical interpretation. (under construction)
-
-- **Clinical Metrics and Detailed Reports**  
-  Integrates site-specific clinical metrics (such as percentage change in Alpha power and Theta/Beta ratio) and generates comprehensive HTML reports with interactive dropdowns and detailed plots.
 
 ## ✨ Key Features
 
