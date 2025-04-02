@@ -188,6 +188,8 @@ pandas: For handling clinical metrics and CSV outputs.
 
 ### Installation Steps
 
+[![Windows Install Video](https://img.youtube.com/vi/P-N9JAoza4E/0.jpg)](https://www.youtube.com/watch?v=P-N9JAoza4E "Windows Install Video")
+
 Quick and dirty Windows install
 
 Downoad the zip extract the folder to you desktop and then double click on the setup.bat and then follow along from the prepare you files and run in cmd in the project directory python main.py
