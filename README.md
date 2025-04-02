@@ -168,37 +168,51 @@ Each module is designed to be self-contained yet interconnected, following indus
 
 ### Prerequisites
 mne: For EEG data processing and source localization.
+
 numpy: For numerical computations.
+
 scipy: For signal processing routines.
+
 matplotlib: For all plotting and visualization.
+
 jinja2: For HTML report generation.
+
 rich: For the live command-line display.
+
 nolds: For detrended fluctuation analysis (DFA).
+
 antropy: For entropy and complexity measures.
+
 pandas: For handling clinical metrics and CSV outputs.
 
 
 ### Installation Steps
-quick and dirty windows install
 
-simply downoad the zip extract the folder to you desktop and then double click on the setup.bat and then follow along from the prepare you files and run in cmd in the project directory python main.py
+Quick and dirty Windows install
+
+Downoad the zip extract the folder to you desktop and then double click on the setup.bat and then follow along from the prepare you files and run in cmd in the project directory python main.py
 
 Install Python:
 Download and install Python 3.x (I used Python 3.10) 
+
 from: https://www.python.org/downloads/
 
 Download the Project:
+
 Download the project ZIP file from GitHub and extract the folder to your desktop.
+
 
 Prepare Your EDF Files:
 Place your EDF files into the project folder. Make sure the filenames include "eo" (or "EO") for Eyes Open and "ec" (or "EC") for Eyes Closed.
 
 Run the Project:
+
 Open the Command Prompt, navigate (cd) to the project folder, and run:
   
   python main.py
 
 Install Missing Packages:
+
 If you see errors about missing packages, install them by running:
  
   pip install mne numpy matplotlib rich jinja2 antropy nolds pandas scipy
@@ -242,7 +256,7 @@ Execute main.py for automatic EEG processing and interactive report generation
 
 
 
-This script will:
+**This script will:
 
 Group the EDF files by subject.
 
