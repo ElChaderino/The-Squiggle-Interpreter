@@ -62,39 +62,66 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
 - **Clinical Metrics and Detailed Reports**  
   Integrates site-specific clinical metrics (such as percentage change in Alpha power and Theta/Beta ratio) and generates comprehensive HTML reports with interactive dropdowns and detailed plots.
 
-  **Recent Updates**
+## ✨ Key Features
 
-Vigilance Module (Inspired by Jay Gunkleman)
+- **EEG Data Grouping and Preprocessing**  
+  Scans directories for EDF files and automatically groups by subject and condition (EO/EC). Applies standard montages and referencing. Optional CSD support for enhanced surface mapping.
 
-Classifies vigilance levels using Alpha/Theta ratios
+- **Band Power Analysis**  
+  Computes absolute and relative band power for Delta, Theta, Alpha, SMR, Beta, and High Beta bands.
 
-Graphical output in both hypnogram and colored strip formats
+- **Topographic Mapping**  
+  Creates global topomaps (absolute and relative) for each frequency band. Dark-mode styled for publication-quality output.
 
-Integrated into clinical report for visual attention fluctuation tracking
+- **Waveform and ERP Visualization**  
+  Generates global waveform grids and pseudo-ERP plots to show signal characteristics.
 
-CSD (Current Source Density) Support (Suggested by Jay Gunkleman and is a happy enchancement to the graphs which were a bit lacking in color pop and correctness xD )
+- **Coherence and Z-Score Analysis**  
+  Creates coherence matrices and robust z-score topomaps based on clinical norms.
 
-Optional application of surface Laplacian via MNE's CSD module
+- **Time-Frequency Representation (TFR)**  
+  Computes TFRs using Morlet wavelets to visualize dynamic spectral activity.
 
-Enables sharper topographic interpretations
+- **ICA Component Visualization**  
+  Plots independent components to help identify and reject artifacts.
 
-Can be toggled in preprocessing phase (for graphing only)
+- **Source Localization**  
+  Uses forward and inverse modeling (LORETA, sLORETA, and eLORETA) to map EEG signals onto 3D brain surfaces.
 
-CDA Preparation and Execution
+- **Vigilance Detection**  
+  Provides epoch-level vigilance classification using Alpha/Theta ratios.  
+  Includes hypnograms and colored vigilance strips representing states A1–C.  
+  Useful for fatigue tracking, insomnia detection, attention profiling, and pre-sleep patterning.  
+  _(Currently under construction. Inspired by Jay Gunkleman.)_
 
-Signal split architecture enables data handling for both Source Localization and CDA
+- **Clinical Metrics and Detailed Reports**  
+  Calculates Alpha percentage shifts, Theta/Beta ratios, and other metrics.  
+  Compiles all visualizations and metrics into a unified, interactive HTML report.
 
-CDA-compatible output for direct comparison of regional activation changes
+---
 
-Built to support future implementations for canonical discriminant analysis (CDA) classifiers
+## 🔄 Recent Updates
 
-Data Handling and Source Localization
+### 🧠 Vigilance Module *(inspired by Jay Gunkleman)*
+- Classifies vigilance levels based on Alpha/Theta ratios.
+- Produces hypnogram plots and colored vigilance strips.
+- Integrated into reports for assessing arousal stability and attentional regulation.
 
-Preprocessing pipeline now includes conditional referencing logic for forward model support
+### ⚡️ Current Source Density (CSD) *(inspired by Jay Gunkleman)*
+- Adds Laplacian-transformed visualization via MNE-Python's CSD.
+- Enhances topomap sharpness and visual clarity.
+- Toggle-able during preprocessing for visualization only.
 
-Ensures compatibility with inverse operators (LORETA variants)
+### 📈 Canonical Discriminant Analysis (CDA) Prep *(inspired by Jay Gunkleman)*
+- Backend now splits signals for CDA and source localization independently.
+- Generates CDA-compatible outputs for regional activation comparison.
+- Scaffolded for future CDA classifier development and group statistics support.
 
-Generates both condition-specific and global visualizations for brain mapping
+### 🧭 Source Localization Enhancements
+- Conditional referencing logic added for forward modeling.
+- Supports flexible referencing for inverse solutions.
+- Visualizations generated per condition, frequency, and localization method.
+
 
 
 
