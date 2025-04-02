@@ -72,7 +72,7 @@ Graphical output in both hypnogram and colored strip formats
 
 Integrated into clinical report for visual attention fluctuation tracking
 
-CSD (Current Source Density) Support
+CSD (Current Source Density) Support (Suggested by Jay Gunkleman and is a happy enchancement to the graphs which were a bit lacking in color pop and correctness xD )
 
 Optional application of surface Laplacian via MNE's CSD module
 
