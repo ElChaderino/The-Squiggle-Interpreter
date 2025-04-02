@@ -347,5 +347,7 @@ and many many many more that are on the way to the list...
 
 The Squiggle Interpreter is designed to be a transparent, community-driven tool. Its open-source nature ensures that users have full access to the underlying algorithms, enabling validation, modification, and extension to suit individual clinical or research needs.
 
+This tool is not intended to diagnose, treat, or replace clinical-grade QEEG systems. It's a learning tool and rapid-review EEG preprocessor aimed at researchers, students, and tech-curious clinicians
+
 ![profileIcon_vwsw2bdutjzb1](https://github.com/user-attachments/assets/f45d0304-a0aa-4f5a-b1ef-c1df97d53041)
 
