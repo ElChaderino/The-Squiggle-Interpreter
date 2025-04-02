@@ -192,7 +192,7 @@ pandas: For handling clinical metrics and CSV outputs.
 
 Quick and dirty Windows install
 
-Downoad the zip extract the folder to you desktop and then double click on the setup.bat and then follow along from the prepare you files and run in cmd in the project directory python main.py
+Downoad the zip extract the folder to your desktop and then double click on the setup.bat and then follow along from the prepare you files and run in cmd in the project directory python main.py
 
 Install Python:
 Download and install Python 3.x (I used Python 3.10) 
