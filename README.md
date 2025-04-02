@@ -56,6 +56,9 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
 - **Source Localization**  
   Uses forward and inverse modeling (LORETA, sLORETA, and eLORETA) for source localization and visualizes these on 3D brain surfaces.
 
+- **Vigilance Detection**  
+  Provides epoch-level vigilance classification based on Alpha/Theta power ratios. Outputs include hypnogram-style visualizations and colored vigilance strips to represent arousal states (A1–C). Useful for assessing fatigue, attention regulation, insomnia patterns, and pre-sleep transitions. All plots are optimized for dark mode and suitable for clinical interpretation.
+
 - **Clinical Metrics and Detailed Reports**  
   Integrates site-specific clinical metrics (such as percentage change in Alpha power and Theta/Beta ratio) and generates comprehensive HTML reports with interactive dropdowns and detailed plots.
 
