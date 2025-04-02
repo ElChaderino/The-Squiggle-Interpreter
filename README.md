@@ -1,4 +1,4 @@
-GNU Terry Pratchett
+GNU Terry Pratchett  -Ook
 
 ![12](https://github.com/user-attachments/assets/77e7155d-265c-48bb-822d-d552294967fe)
 
@@ -376,6 +376,7 @@ Gunkelman, J. (2001). qEEG guidelines. EEG Clinical Reviews, 15(1), 45–58.
 Fisher, S. (2005). EEG standardization challenges. Journal of Neurodiagnostic Techniques, 17(3), 220–230.
 
 Budzynski, T. H., Budzynski, H. K., Evans, J. R., & Abarbanel, A. (2009). Introduction to Quantitative EEG and Neurofeedback: Advanced Theory and Applications (2nd ed.). Academic Press.
+https://www.brainmaster.com/tfc/index_files/Publications/2009%20budz%20book%20entire%20want%20126-164.pdf?srsltid=AfmBOoqGhpYRslsJNKhayPQEQBOU0aZOqLccd8nD8vKFmF4zsqvs6bzI
 
 and many many many more that are on the way to the list... 
 
