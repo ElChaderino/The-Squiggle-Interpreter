@@ -8,7 +8,7 @@ Please note this is not a finished project and it still has a lot of refining an
 
 *The Squiggle Interpreter* is an open-source EEG/qEEG analysis platform designed to bridge clinical, research, and industry standards. Developed by **EL Chaderino/VocalARR**, this tool is intended to empower users by providing a transparent, customizable, and extensible solution for advanced EEG data processing. Unlike black-box systems, The Squiggle Interpreter exposes its inner workings—allowing users to verify, modify, and expand its capabilities.
 
-
+https://mne.tools/stable/index.html
 
 ## Table of Contents
 
