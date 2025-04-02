@@ -1,4 +1,5 @@
 GNU Terry Pratchett
+
 ![12](https://github.com/user-attachments/assets/77e7155d-265c-48bb-822d-d552294967fe)
 
 Please note this is not a finished project and it still has a lot of refining and cleaning up as well as expanding to be done. there is a live feedback system thats in the process of being integrated into the Squiggle Interpreter as well as a Report generator that was in the early build. any ideas on what else to add are always welcome and I hope this is of use to those who are interested in this sort of thing.  
