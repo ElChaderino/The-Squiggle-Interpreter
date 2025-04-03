@@ -12,18 +12,131 @@ import signal
 
 from modules.vigilance import plot_vigilance_hypnogram
 from modules import io_utils, processing, plotting, report, clinical, vigilance
+from mne.io.constants import FIFF
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 
 stop_event = threading.Event()
+
+# Try to import psd_welch; if unavailable, use psd_array_welch as fallback.
+try:
+    from mne.time_frequency import psd_welch
+except ImportError:
+    from mne.time_frequency import psd_array_welch as psd_welch
+
+from modules.vigilance import plot_vigilance_hypnogram
+from modules import io_utils, processing, plotting, report, clinical, vigilance
+
+# ---------------- Robust Z-Score Functions ----------------
+from scipy.stats import zscore, pearsonr
+import pandas as pd
+
+def robust_mad(x, constant=1.4826, max_iter=10, tol=1e-3):
+    """
+    Compute a robust MAD (Median Absolute Deviation) with iterative outlier rejection.
+    Returns a scaled MAD (to be comparable to std) and the median.
+    """
+    x = np.asarray(x)
+    med = np.median(x)
+    mad = np.median(np.abs(x - med))
+    for _ in range(max_iter):
+        mask = np.abs(x - med) <= 3 * mad
+        new_med = np.median(x[mask])
+        new_mad = np.median(np.abs(x[mask] - new_med))
+        if np.abs(new_med - med) < tol and np.abs(new_mad - mad) < tol:
+            break
+        med, mad = new_med, new_mad
+    return mad * constant, med
+
+def robust_zscore(x, use_iqr=False):
+    """
+    Compute robust z-scores using the median and either MAD or IQR.
+    """
+    x = np.asarray(x)
+    med = np.median(x)
+    if use_iqr:
+        q75, q25 = np.percentile(x, [75, 25])
+        iqr = q75 - q25
+        scale = iqr if iqr != 0 else 1.0
+    else:
+        scale, med = robust_mad(x)
+        if scale == 0:
+            scale = 1.0
+    return (x - med) / scale
+
+def compute_bandpower_robust_zscores(raw, bands=None, fmin=1, fmax=40, n_fft=2048, use_iqr=False):
+    """
+    Compute robust z-scores of log bandpower for each channel.
+    
+    Parameters:
+      raw : mne.io.Raw
+        Preprocessed EEG data.
+      bands : dict
+        Frequency bands (default: delta, theta, alpha, beta, gamma).
+      fmin, fmax : float
+        Frequency limits for PSD computation.
+      n_fft : int
+        FFT length.
+      use_iqr : bool
+        If True, use IQR for scaling; otherwise, use MAD.
+    
+    Returns:
+      dict of {band: robust z-scores array}
+    """
+    if bands is None:
+        bands = {
+            'delta': (1, 4),
+            'theta': (4, 8),
+            'alpha': (8, 12),
+            'beta': (12, 30),
+            'gamma': (30, 40)
+        }
+    # Pass the data array and sfreq to psd_welch
+    psds, freqs = psd_welch(raw.get_data(), raw.info['sfreq'], fmin=fmin, fmax=fmax, n_fft=n_fft, verbose=False)
+    psds_db = 10 * np.log10(psds)
+    robust_features = {}
+    for band, (low, high) in bands.items():
+        band_mask = (freqs >= low) & (freqs <= high)
+        band_power = psds_db[:, band_mask].mean(axis=1)
+        robust_features[band] = robust_zscore(band_power, use_iqr=use_iqr)
+    return robust_features
+
+def load_clinical_outcomes(csv_file, n_channels):
+    """
+    Load clinical outcomes from a CSV file.
+    Expects a column named 'outcome'. If the file is not found or errors occur,
+    returns a dummy vector.
+    """
+    try:
+        df = pd.read_csv(csv_file)
+        outcomes = df['outcome'].values
+        if len(outcomes) < n_channels:
+            outcomes = np.pad(outcomes, (0, n_channels - len(outcomes)), mode='constant')
+        return outcomes[:n_channels]
+    except Exception as e:
+        print("Could not load clinical outcomes from CSV:", e)
+        return np.random.rand(n_channels)
+
+def compare_zscores(standard_z, robust_z, clinical_outcomes):
+    """
+    Compare standard z-scores (using mean/std) with robust z-scores via Pearson correlation
+    against clinical outcome data.
+    """
+    for band in standard_z.keys():
+        r_std, p_std = pearsonr(standard_z[band], clinical_outcomes)
+        r_rob, p_rob = pearsonr(robust_z[band], clinical_outcomes)
+        print(f"Band {band}:")
+        print(f"  Standard z-score: r = {r_std:.3f}, p = {p_std:.3f}")
+        print(f"  Robust z-score  : r = {r_rob:.3f}, p = {p_rob:.3f}")
+
+# ---------------- End Robust Z-Score Functions ----------------
+
 # --- Utility: Group EDF files by subject ---
 def find_subject_edf_files(directory):
     """
     Find and group EDF files by subject.
-    Assumes filenames are in the format: <subjectID>eo.edf and <subjectID>ec.edf
-    e.g., "c1eo.edf", "c1ec.edf", "e1eo.edf", "e1ec.edf"
-    Returns a dict: { subjectID: {"EO": filename, "EC": filename}, ... }
+    Assumes filenames are in the format: <subjectID>eo.edf and <subjectID>ec.edf.
     """
     edf_files = [f for f in os.listdir(directory) if f.lower().endswith('.edf')]
     subjects = {}
@@ -81,6 +194,7 @@ def main():
         prog='The Squiggle Interpreter',
         description='What the program does')
     parser.add_argument('--csd', required=True, help="Use current source density (CSD) for graphs only? (y/n), default is no")
+    parser.add_argument('--zscore', help="z-score normalization method: 1: Standard (mean/std), 2: Robust (MAD-based), 3: Robust (IQR-based), 4: Published Norms (adult norms)")
     args = parser.parse_args()
     project_dir = os.getcwd()
     overall_output_dir = os.path.join(project_dir, "outputs")
@@ -88,16 +202,37 @@ def main():
     use_csd_for_graphs = True if args.csd == "y" else False
     print(f"Using CSD for graphs: {use_csd_for_graphs}")
     
-    # --- Batch processing: Group EDF files by subject ---
+    if args.zscore is None:
+        # Prompt user for z-score normalization method:
+        print("Choose z-score normalization method:")
+        print("  1: Standard (mean/std)")
+        print("  2: Robust (MAD-based)")
+        print("  3: Robust (IQR-based)")
+        print("  4: Published Norms (adult norms)")
+        method_choice = input("Enter choice (default 1): ") or "1"
+    else:
+        method_choice = args.zscore
+    
+    if method_choice == "4":
+        published_norm_stats = {
+            "Alpha":    {"median": 20.0, "mad": 4.0},
+            "Theta":    {"median": 16.0, "mad": 3.5},
+            "Delta":    {"median": 22.0, "mad": 5.0},
+            "SMR":      {"median": 7.0,  "mad": 1.5},
+            "Beta":     {"median": 6.0,  "mad": 1.8},
+            "HighBeta": {"median": 4.0,  "mad": 1.2}
+        }
+        print("Using published normative values for adult EEG (published_norm_stats).")
+    else:
+        published_norm_stats = None
+    
     subject_edf_groups = find_subject_edf_files(project_dir)
     print("Found subject EDF files:", subject_edf_groups)
     
-    # Process each subject separately.
     for subject, files in subject_edf_groups.items():
         subject_folder = os.path.join(overall_output_dir, subject)
         os.makedirs(subject_folder, exist_ok=True)
         
-        # Create subject-specific output folders.
         folders = {
             "topomaps_eo": os.path.join(subject_folder, "topomaps", "EO"),
             "topomaps_ec": os.path.join(subject_folder, "topomaps", "EC"),
@@ -128,12 +263,54 @@ def main():
         ec_file = files["EC"] if files["EC"] else files["EO"]
         print(f"Subject {subject}: EO file: {eo_file}, EC file: {ec_file}")
         
-        # Load data without CSD for forward/inverse modeling.
         raw_eo = io_utils.load_eeg_data(os.path.join(project_dir, eo_file), use_csd=False)
         raw_ec = io_utils.load_eeg_data(os.path.join(project_dir, ec_file), use_csd=False)
         print("Loaded data for subject", subject)
         
-        # Create CSD copies for graphing if requested.
+        # --- Compute Bandpower Features & Z-Scores for EO Data ---
+        # Use raw.get_data() and raw.info['sfreq'] when calling psd_welch
+        psds, freqs = psd_welch(raw_eo.get_data(), raw_eo.info['sfreq'], fmin=1, fmax=40, n_fft=2048, verbose=False)
+        psds_db = 10 * np.log10(psds)
+        default_bands = {
+            'delta': (1, 4),
+            'theta': (4, 8),
+            'alpha': (8, 12),
+            'beta': (12, 30),
+            'gamma': (30, 40)
+        }
+        standard_features = {}
+        for band, (low, high) in default_bands.items():
+            band_mask = (freqs >= low) & (freqs <= high)
+            band_power = psds_db[:, band_mask].mean(axis=1)
+            standard_features[band] = zscore(band_power)
+        
+        if method_choice == "1":
+            chosen_features = standard_features
+            print("Using standard z-scores (mean/std) for bandpower features.")
+        elif method_choice == "2":
+            chosen_features = compute_bandpower_robust_zscores(raw_eo, bands=default_bands, use_iqr=False)
+            print("Using robust z-scores (MAD-based) for bandpower features.")
+        elif method_choice == "3":
+            chosen_features = compute_bandpower_robust_zscores(raw_eo, bands=default_bands, use_iqr=True)
+            print("Using robust z-scores (IQR-based) for bandpower features.")
+        elif method_choice == "4":
+            chosen_features = {}
+            zscore_maps_eo = processing.compute_all_zscore_maps(raw_eo, published_norm_stats, epoch_len_sec=2.0)
+            for band in default_bands.keys():
+                chosen_features[band] = zscore_maps_eo.get(band, np.array([]))
+            print("Using published norms for z-score normalization.")
+        else:
+            print("Invalid choice. Defaulting to standard z-scores.")
+            chosen_features = standard_features
+        
+        # --- Load Clinical Outcomes (Published or Dummy) ---
+        clinical_csv = os.path.join(project_dir, "clinical_outcomes.csv")
+        clinical_outcomes = load_clinical_outcomes(clinical_csv, raw_eo.info['nchan'])
+        
+        print("Comparing standard vs. chosen z-score method:")
+        compare_zscores(standard_features, chosen_features, clinical_outcomes)
+        # --- End Z-Score Comparison ---
+        
         if use_csd_for_graphs:
             raw_eo_csd = raw_eo.copy().load_data()
             raw_ec_csd = raw_ec.copy().load_data()
@@ -142,43 +319,29 @@ def main():
                 print("CSD applied for graphs (EO).")
             except Exception as e:
                 print("CSD for graphs (EO) failed:", e)
-                raw_eo_csd = raw_eo  # fallback
+                raw_eo_csd = raw_eo
             try:
                 raw_ec_csd = mne.preprocessing.compute_current_source_density(raw_ec_csd)
                 print("CSD applied for graphs (EC).")
             except Exception as e:
                 print("CSD for graphs (EC) failed:", e)
-                raw_ec_csd = raw_ec  # fallback
+                raw_ec_csd = raw_ec
         else:
             raw_eo_csd = raw_eo
             raw_ec_csd = raw_ec
         
         # --- Integrate Vigilance Module ---
-        # Use a 2-second epoch (to allow a longer filter transition band)
         vigilance_states = vigilance.compute_vigilance_states(raw_eo, epoch_length=2.0)
-
-        # Plot the hypnogram and save it without displaying
         fig = vigilance.plot_vigilance_hypnogram(vigilance_states, epoch_length=2.0)
         hypno_path = os.path.join(folders["vigilance"], "vigilance_hypnogram.png")
         fig.savefig(hypno_path, facecolor='black')
         plt.close(fig)
         print(f"Saved vigilance hypnogram to {hypno_path}")
-
-
+        
         print("Vigilance states (time in s, stage):")
         for t, stage in vigilance_states:
             print(f"{t:5.1f}s: {stage}")
-
-        # Plot and save the original color vigilance strip (if needed)
-        fig_strip = vigilance.plot_vigilance_strip(vigilance_states, epoch_length=2.0)
-        vigilance_strip_path = os.path.join(folders["vigilance"], "vigilance_strip.png")
-        fig_strip.savefig(vigilance_strip_path, facecolor='black')
-        plt.close(fig_strip)
-        print(f"Saved vigilance strip to {vigilance_strip_path}")
-
         
-        # --- New: Plot a step-style hypnogram ---
-        # (Make sure that modules.vigilance has the function plot_vigilance_hypnogram)
         try:
             fig_hypno = vigilance.plot_vigilance_hypnogram(vigilance_states, epoch_length=2.0)
             vigilance_hypno_path = os.path.join(folders["vigilance"], "vigilance_hypnogram.png")
@@ -186,9 +349,8 @@ def main():
             plt.close(fig_hypno)
             print(f"Saved vigilance hypnogram to {vigilance_hypno_path}")
         except AttributeError:
-            print("Error: 'plot_vigilance_hypnogram' not found in modules.vigilance. Please update the vigilance module accordingly.")
+            print("Error: 'plot_vigilance_hypnogram' not found in modules.vigilance.")
         
-        # Continue with existing processing...
         bp_eo = processing.compute_all_band_powers(raw_eo)
         bp_ec = processing.compute_all_band_powers(raw_ec)
         print(f"Subject {subject} - Computed band powers for EO channels:", list(bp_eo.keys()))
@@ -197,10 +359,7 @@ def main():
         clinical.generate_site_reports(bp_eo, bp_ec, subject_folder)
         
         band_list = list(processing.BANDS.keys())
-        
-        # --- Global Topomaps for each band ---
         for band in band_list:
-            # EO Topomap.
             abs_eo = [bp_eo[ch][band] for ch in raw_eo.ch_names]
             rel_eo = []
             for ch in raw_eo.ch_names:
@@ -212,7 +371,6 @@ def main():
             plt.close(fig_topo_eo)
             print(f"Subject {subject}: Saved EO topomap for {band} to {eo_topo_path}")
             
-            # EC Topomap.
             abs_ec = [bp_ec[ch][band] for ch in raw_ec.ch_names]
             rel_ec = []
             for ch in raw_ec.ch_names:
@@ -224,7 +382,6 @@ def main():
             plt.close(fig_topo_ec)
             print(f"Subject {subject}: Saved EC topomap for {band} to {ec_topo_path}")
         
-        # --- Global Waveform Grids (EO) ---
         global_waveforms = {}
         data_eo = raw_eo.get_data() * 1e6
         sfreq = raw_eo.info['sfreq']
@@ -236,7 +393,6 @@ def main():
             global_waveforms[band] = os.path.basename(wf_path)
             print(f"Subject {subject}: Saved EO waveform grid for {band} to {wf_path}")
         
-        # --- Global ERP Plots ---
         erp_eo_fig = processing.compute_pseudo_erp(raw_eo)
         erp_eo_path = os.path.join(folders["erp"], "erp_EO.png")
         erp_eo_fig.savefig(erp_eo_path, facecolor='black')
@@ -249,11 +405,9 @@ def main():
         plt.close(erp_ec_fig)
         print(f"Subject {subject}: Saved ERP EC to {erp_ec_path}")
         
-        # --- Global Coherence Maps for each band ---
         coherence_maps = {"EO": {}, "EC": {}}
         for band in band_list:
             band_range = processing.BANDS[band]
-            # EO coherence.
             coh_matrix_eo = processing.compute_coherence_matrix(raw_eo.get_data() * 1e6, sfreq, band_range, nperseg=int(sfreq*2))
             fig_coh_eo = plotting.plot_coherence_matrix(coh_matrix_eo, raw_eo.ch_names)
             coh_path_eo = os.path.join(folders["coherence_eo"], f"coherence_{band}.png")
@@ -262,7 +416,6 @@ def main():
             coherence_maps["EO"][band] = os.path.basename(coh_path_eo)
             print(f"Subject {subject}: Saved EO coherence ({band}) to {coh_path_eo}")
             
-            # EC coherence.
             coh_matrix_ec = processing.compute_coherence_matrix(raw_ec.get_data() * 1e6, sfreq, band_range, nperseg=int(sfreq*2))
             fig_coh_ec = plotting.plot_coherence_matrix(coh_matrix_ec, raw_ec.ch_names)
             coh_path_ec = os.path.join(folders["coherence_ec"], f"coherence_{band}.png")
@@ -271,15 +424,17 @@ def main():
             coherence_maps["EC"][band] = os.path.basename(coh_path_ec)
             print(f"Subject {subject}: Saved EC coherence ({band}) to {coh_path_ec}")
         
-        # --- Global Robust Z-Score Topomaps ---
-        norm_stats = {
-            "Alpha": {"median": 18.0, "mad": 6.0},
-            "Theta": {"median": 15.0, "mad": 5.0},
-            "Delta": {"median": 20.0, "mad": 7.0},
-            "SMR": {"median": 6.0, "mad": 2.0},
-            "Beta": {"median": 5.0, "mad": 2.0},
-            "HighBeta": {"median": 3.5, "mad": 1.5}
-        }
+        if published_norm_stats is not None:
+            norm_stats = published_norm_stats
+        else:
+            norm_stats = {
+                "Alpha": {"median": 18.0, "mad": 6.0},
+                "Theta": {"median": 15.0, "mad": 5.0},
+                "Delta": {"median": 20.0, "mad": 7.0},
+                "SMR": {"median": 6.0, "mad": 2.0},
+                "Beta": {"median": 5.0, "mad": 2.0},
+                "HighBeta": {"median": 3.5, "mad": 1.5}
+            }
         zscore_maps_eo = processing.compute_all_zscore_maps(raw_eo, norm_stats, epoch_len_sec=2.0)
         zscore_maps_ec = processing.compute_all_zscore_maps(raw_ec, norm_stats, epoch_len_sec=2.0)
         zscore_images_eo = {}
@@ -300,8 +455,7 @@ def main():
                 zscore_images_ec[band] = os.path.basename(zscore_path_ec)
                 print(f"Subject {subject}: Saved EC z-score ({band}) to {zscore_path_ec}")
         
-        # --- Global TFR Maps ---
-        n_cycles = 2.0  # Example value; adjust as needed.
+        n_cycles = 2.0
         tfr_maps_eo = processing.compute_all_tfr_maps(raw_eo, n_cycles, tmin=0.0, tmax=4.0)
         tfr_maps_ec = processing.compute_all_tfr_maps(raw_ec, n_cycles, tmin=0.0, tmax=4.0)
         tfr_images_eo = {}
@@ -326,7 +480,6 @@ def main():
             else:
                 print(f"Subject {subject}: TFR EC for {band} was not computed.")
         
-        # --- Global ICA Components Plot (EO) ---
         ica = processing.compute_ica(raw_eo)
         fig_ica = plotting.plot_ica_components(ica, raw_eo)
         ica_path = os.path.join(folders["ica_eo"], "ica_EO.png")
@@ -334,7 +487,6 @@ def main():
         plt.close(fig_ica)
         print(f"Subject {subject}: Saved ICA EO to {ica_path}")
         
-        # --- Global Source Localization ---
         raw_source_eo = raw_eo.copy()
         raw_source_ec = raw_ec.copy()
         raw_source_eo.set_eeg_reference("average", projection=False)
@@ -390,11 +542,9 @@ def main():
         print("Source Localization dictionary:")
         print(source_localization)
         
-        # --- Detailed Per-Site Reports ---
         from modules.clinical import generate_full_site_reports
         generate_full_site_reports(raw_eo, raw_ec, folders["detailed"])
         
-        # --- Build per-site plot dictionary for the report ---
         site_list = raw_eo.ch_names
         site_dict = {}
         for site in site_list:
