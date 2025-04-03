@@ -84,13 +84,22 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
 - Generates CDA-compatible outputs for regional activation comparison.
 - Scaffolded for future CDA classifier development and group statistics support.
 
+### 📊 Enhanced Robust Z-Score Computation *(inspired by Jay Gattis)*
+- Now supports three z-score methods: standard (mean/std), robust using MAD (with iterative outlier rejection), and robust using IQR.
+- Offers an option to use published clinical norms (e.g., adult Cuban qEEG values) for clinically validated z-scores.
+
+### 🔍 Clinical Outcome Integration *(inspired by Jay Gattis)*
+- Integrates clinical outcome data (loaded from CSV or dummy fallback) to compare and validate z-score methods via Pearson correlations.
+- Facilitates direct assessment of which normalization method best correlates with clinical measures.
+
+### 🔗 Coherence Matrix Visualization
+- Computes frequency-specific coherence matrices and visualizes them as heatmaps for both conditions (EO and EC).
+- Provides a comprehensive view combining local power abnormalities (via z-score topomaps) and inter-channel connectivity (via coherence analysis).
+
 ### 🧭 Source Localization Enhancements
 - Conditional referencing logic added for forward modeling.
 - Supports flexible referencing for inverse solutions.
 - Visualizations generated per condition, frequency, and localization method.
-
-
-
 
 ![Global Topos](https://github.com/user-attachments/assets/43e1a449-70c7-4fb9-a101-12e44c90137a)
 ![Global Waveforms](https://github.com/user-attachments/assets/39999f29-ceef-4eac-81c7-464736080481)
