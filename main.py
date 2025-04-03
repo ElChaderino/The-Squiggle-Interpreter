@@ -193,13 +193,17 @@ def main():
     parser = argparse.ArgumentParser(
         prog='The Squiggle Interpreter',
         description='What the program does')
-    parser.add_argument('--csd', required=True, help="Use current source density (CSD) for graphs only? (y/n), default is no")
+    parser.add_argument('--csd', help="Use current source density (CSD) for graphs only? (y/n), default is no")
     parser.add_argument('--zscore', help="z-score normalization method: 1: Standard (mean/std), 2: Robust (MAD-based), 3: Robust (IQR-based), 4: Published Norms (adult norms)")
     args = parser.parse_args()
     project_dir = os.getcwd()
     overall_output_dir = os.path.join(project_dir, "outputs")
     os.makedirs(overall_output_dir, exist_ok=True)
-    use_csd_for_graphs = True if args.csd == "y" else False
+    if args.csd is None:
+        csd_choice = input("Use current source density (CSD) for graphs only? (y/n, default n in 5 sec): ")
+        use_csd_for_graphs = True if csd_choice.lower() == "y" else False
+    else:
+        use_csd_for_graphs = True if args.csd == "y" else False
     print(f"Using CSD for graphs: {use_csd_for_graphs}")
     
     if args.zscore is None:
