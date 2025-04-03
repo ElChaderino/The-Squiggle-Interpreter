@@ -172,3 +172,12 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# EDF
+*.edf
+
+#pycache
+modules/__pycache__
+
+#outputs
+outputs
