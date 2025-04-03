@@ -5,7 +5,9 @@ import threading
 import time
 import subprocess
 import numpy as np
-import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot as plt
 import mne
 import argparse
 import signal
@@ -166,7 +168,46 @@ def live_eeg_display(stop_event, update_interval=0.7):
             "That rug really tied the room together.",
             "Yeah, well, you know, that's just, like, your opinion, man.",
             "Sometimes you eat the bear, and sometimes, well, the bear eats you.",
-            "Watch the squiggles, man. They're pure EEG poetry."
+            "Watch the squiggles, man. They're pure EEG poetry.",
+            "This aggression will not stand... not even in beta spindles.",
+            "Don’t cross the streams, Walter. I’m seeing delta in my alpha, man.",
+            "Calmer than you are? My frontal lobes are lighting up like a bowling alley.",
+            "Smokey, this is not 'Nam. This is neurofeedback. There are protocols.",
+            "Obviously you’re not a golfer, or you’d know theta doesn’t spike like that.",
+            "I’m not wrong, Walter. The prefrontal cortex is just... overcooked.",
+             "You want a toe? I can get you a toe. With a clean EEG, by 3 o'clock."
+            "Careful, man, there's a coherence drop in there!",
+            "Eight channels, man. You think the Dude has time for 19?",
+            "This whole brain is out of order!",
+            "That’s not artifact, that’s just the Dude dreaming in delta.",
+            "Shut the f** up, Donny, you're spiking in high beta again.",
+            "You mark that trace zero, you're entering a theta fugue.",
+            "I bowl. I don't analyze cross-frequency coupling.",
+            "This EEG aggression will not stand, man!",
+            "What do you do for recreation? Oh, the usual... meditate, neurofeedback, bowl.",
+            "Donny, you're out of your element—this is neuropsychophysiology!",
+            "You want frontal midline theta? I can get you frontal midline theta, believe me.",
+            "This isn’t 'Nam, this is Clinical Q. There are amplitude thresholds."
+            "It's not rocket science, it's just too much theta. Drink less coffee, meditate more. Boom—clinical.",
+            "If your brain’s not efficient, try turning it off and back on with two minutes of eyes closed alpha.",
+            "All behavior is brain behavior, except for Mondays. Mondays are the devil’s artifact.",
+            "Delta in the front? That’s not enlightenment, that’s executive dysfunction, my friend.",
+            "Do the Clinical Q. It’s like a brain oil change, but with fewer wrenches and more blinking lights."
+            "If you don’t look at the raw EEG, the ghosts of spindle-burst babies will haunt your reports.",
+            "There's a spike in that waveform, but is it epileptiform or just too much espresso?",
+            "This isn't artifact—it's a neurological opera performed by glial cell ballerinas.",
+            "You don’ttreat* ADHD, you negotiate a truce with the thalamus.",
+            "I once saw a guy with 40 Hz gamma in rest state—either a bodhisattva or a malfunctioning router."
+            "Train your brain like a CrossFit junkie, just less sweat and more midline theta.",
+            "You want cognitive gains? Then lift that alpha like it's leg day, bro.",
+            "Your frontal lobes called. They want less doomscrolling and more neurofeedback.",
+            "We’re not hacking your brain. We’re just suggesting politely that it stop freaking out.",
+            "QEEG: because guessing your brain state is so 1990s."
+            "When the beta waves dance too loud, the soul forgets how to whisper.",
+            "An overactive cortex is just a heart trying to solve its feelings with calculus.",
+            "The brain is not broken. It’s just wearing the wrong emotional hat.",
+            "You don’t treat trauma, you compost it in the neuro-garden until it grows flowers.",
+            "Alpha is the silence between thoughts. High beta is a squirrel on espresso playing drums."
         ]
         return np.random.choice(quotes)
     
@@ -193,13 +234,17 @@ def main():
     parser = argparse.ArgumentParser(
         prog='The Squiggle Interpreter',
         description='What the program does')
-    parser.add_argument('--csd', required=True, help="Use current source density (CSD) for graphs only? (y/n), default is no")
+    parser.add_argument('--csd', help="Use current source density (CSD) for graphs only? (y/n), default is no")
     parser.add_argument('--zscore', help="z-score normalization method: 1: Standard (mean/std), 2: Robust (MAD-based), 3: Robust (IQR-based), 4: Published Norms (adult norms)")
     args = parser.parse_args()
     project_dir = os.getcwd()
     overall_output_dir = os.path.join(project_dir, "outputs")
     os.makedirs(overall_output_dir, exist_ok=True)
-    use_csd_for_graphs = True if args.csd == "y" else False
+    if args.csd is None:
+        csd_choice = input("Use current source density (CSD) for graphs only? (y/n, default n in 5 sec): ")
+        use_csd_for_graphs = True if csd_choice.lower() == "y" else False
+    else:
+        use_csd_for_graphs = True if args.csd == "y" else False
     print(f"Using CSD for graphs: {use_csd_for_graphs}")
     
     if args.zscore is None:
