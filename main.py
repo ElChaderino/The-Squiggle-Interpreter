@@ -7,10 +7,17 @@ import subprocess
 import numpy as np
 import matplotlib.pyplot as plt
 import mne
+import argparse
+import signal
+
+from modules.vigilance import plot_vigilance_hypnogram
+from modules import io_utils, processing, plotting, report, clinical, vigilance
 from mne.io.constants import FIFF
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
+
+stop_event = threading.Event()
 
 # Try to import psd_welch; if unavailable, use psd_array_welch as fallback.
 try:
@@ -144,7 +151,7 @@ def find_subject_edf_files(directory):
             subjects[subject_id]["EC"] = f
     return subjects
 
-def live_eeg_display(stop_event, update_interval=0.5):
+def live_eeg_display(stop_event, update_interval=0.7):
     def generate_eeg_wave(num_points=80):
         x = np.linspace(0, 4 * np.pi, num_points)
         wave = np.sin(x) + np.random.normal(0, 0.3, size=num_points)
@@ -166,31 +173,45 @@ def live_eeg_display(stop_event, update_interval=0.5):
     console = Console()
     with Live(refresh_per_second=10, console=console) as live:
         while not stop_event.is_set():
-            line = generate_eeg_wave()
-            quote = get_random_quote() if np.random.rand() < 0.1 else ""
+            line = generate_eeg_wave(os.get_terminal_size().columns-4)
+            quote = get_random_quote()
             text = f"[bold green]{line}[/bold green]"
             if quote:
-                text += f"\n[bold red]{quote}[/bold red]"
+                text += f"\n[bold red]{quote}[/bold red]\n"
+            text += f"[bold blue]{line[::-1]}[/bold blue]"
             panel = Panel(text, title="Live EEG Display", subtitle="Simulated Waveform", style="white on black")
             live.update(panel)
             time.sleep(update_interval)
 
+# Signal handler to set the stop event
+def sigint_handler(signum, frame):
+    print("SIGINT received, stopping gracefully...")
+    stop_event.set()
+    sys.exit(0)
+
 def main():
+    parser = argparse.ArgumentParser(
+        prog='The Squiggle Interpreter',
+        description='What the program does')
+    parser.add_argument('--csd', required=True, help="Use current source density (CSD) for graphs only? (y/n), default is no")
+    parser.add_argument('--zscore', help="z-score normalization method: 1: Standard (mean/std), 2: Robust (MAD-based), 3: Robust (IQR-based), 4: Published Norms (adult norms)")
+    args = parser.parse_args()
     project_dir = os.getcwd()
     overall_output_dir = os.path.join(project_dir, "outputs")
     os.makedirs(overall_output_dir, exist_ok=True)
-    
-    csd_choice = input("Use current source density (CSD) for graphs only? (y/n, default n in 5 sec): ")
-    use_csd_for_graphs = True if csd_choice.lower() == "y" else False
+    use_csd_for_graphs = True if args.csd == "y" else False
     print(f"Using CSD for graphs: {use_csd_for_graphs}")
     
-    # Prompt user for z-score normalization method:
-    print("Choose z-score normalization method:")
-    print("  1: Standard (mean/std)")
-    print("  2: Robust (MAD-based)")
-    print("  3: Robust (IQR-based)")
-    print("  4: Published Norms (adult norms)")
-    method_choice = input("Enter choice (default 1): ") or "1"
+    if args.zscore is None:
+        # Prompt user for z-score normalization method:
+        print("Choose z-score normalization method:")
+        print("  1: Standard (mean/std)")
+        print("  2: Robust (MAD-based)")
+        print("  3: Robust (IQR-based)")
+        print("  4: Published Norms (adult norms)")
+        method_choice = input("Enter choice (default 1): ") or "1"
+    else:
+        method_choice = args.zscore
     
     if method_choice == "4":
         published_norm_stats = {
@@ -231,10 +252,13 @@ def main():
         for folder in folders.values():
             os.makedirs(folder, exist_ok=True)
         
-        stop_event = threading.Event()
+        # Start live display (optional)
         live_thread = threading.Thread(target=live_eeg_display, args=(stop_event,))
         live_thread.start()
         
+        # Register the SIGINT handler in the main thread
+        signal.signal(signal.SIGINT, sigint_handler)
+        # Use the subject's EDF files.
         eo_file = files["EO"] if files["EO"] else files["EC"]
         ec_file = files["EC"] if files["EC"] else files["EO"]
         print(f"Subject {subject}: EO file: {eo_file}, EC file: {ec_file}")
