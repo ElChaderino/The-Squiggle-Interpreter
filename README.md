@@ -101,6 +101,40 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
 - Supports flexible referencing for inverse solutions.
 - Visualizations generated per condition, frequency, and localization method.
 
+- New Modules and Features
+Clinical Report Module (clinical_report.py)
+
+Comprehensive Clinical Reporting:
+Generates detailed clinical reports (text, CSV, and interactive HTML) that now integrate the new pyramid model mappings.
+
+Pyramid Model Integration:
+Incorporates differentiated and vigilance-enriched clinical mappings (pyramid levels 1–5) to provide refined clinical interpretations for each EEG channel.
+
+Pyramid Mapping Module (pyramid_model.py)
+
+Provides the data structures and functions needed to map EEG metrics to clinical interpretations.
+
+Supports various levels (e.g., Optimal, Mild Deviation, Moderate Disruption, Severe Dysregulation, and Pathological) based on EEG patterns and cognitive/behavioral indicators.
+
+EDF-to-CSV Conversion Module (data_to_csv.py)
+
+Exports detailed EDF data metrics (channel-level and time-based) into CSV format.
+
+Integrated into the command-line interface via a new flag (--csv) along with parameters for EDF file path, epoch length, and output CSV file path.
+
+Enhancements to the Main Pipeline (main.py)
+Command-Line Interface Improvements:
+
+Now supports prompting for missing parameters such as CSD usage (--csd), z‑score normalization method (--zscore), and whether to generate a full clinical report (--report).
+
+CSV export functionality integrated so users can run a conversion with --csv along with required arguments.
+
+Robust Directory and File Handling:
+
+Updated to use Python’s pathlib for better support of filenames with spaces.
+
+Improved grouping of EDF files by subject based on filename conventions.
+
 ![Global Topos](https://github.com/user-attachments/assets/43e1a449-70c7-4fb9-a101-12e44c90137a)
 ![Global Waveforms](https://github.com/user-attachments/assets/39999f29-ceef-4eac-81c7-464736080481)
 ![Global Coherence](https://github.com/user-attachments/assets/973fb5f2-1469-44dd-8329-337193601a6f)
