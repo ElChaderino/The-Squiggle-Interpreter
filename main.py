@@ -1,4 +1,21 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+main.py - The Squiggle Interpreter: Comprehensive EEG Analysis & Report Generation
+
+This script performs the full EEG processing pipeline:
+  • Discovers EDF files (using pathlib so filenames with spaces are supported) and groups them by subject.
+  • For each subject, loads EEG data (removing "-LE", applying the standard 10–20 montage, average referencing,
+    with optional current source density transform).
+  • Computes band powers, topomaps, ERP, coherence, TFR, ICA, source localization, etc.
+  • Generates detailed clinical reports (text, CSV, and interactive HTML) including refined clinical and connectivity mappings.
+  • Optionally runs extension scripts and displays a live EEG simulation.
+  • Optionally exports EDF data metrics to CSV.
+
+Dependencies: mne, numpy, pandas, matplotlib, argparse, pathlib, rich, etc.
+Ensure that modules/clinical_report.py, modules/pyramid_model.py, and modules/data_to_csv.py are present.
+"""
+
 import os
 import sys
 import threading
@@ -11,6 +28,12 @@ from matplotlib import pyplot as plt
 import mne
 import argparse
 import signal
+from pathlib import Path
+
+# New module imports
+from modules import clinical_report    # Clinical report module integrating pyramid mappings
+from modules import pyramid_model      # Pyramid mapping module
+from modules import data_to_csv        # Module for EDF-to-CSV conversion
 
 from modules.vigilance import plot_vigilance_hypnogram
 from modules import io_utils, processing, plotting, report, clinical, vigilance
@@ -18,22 +41,19 @@ from mne.io.constants import FIFF
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
+from scipy.stats import zscore, pearsonr
+import pandas as pd
 
+# Global stop event for live display
 stop_event = threading.Event()
 
-# Try to import psd_welch; if unavailable, use psd_array_welch as fallback.
+# Try to import psd_welch; if unavailable, fall back to psd_array_welch.
 try:
     from mne.time_frequency import psd_welch
 except ImportError:
     from mne.time_frequency import psd_array_welch as psd_welch
 
-from modules.vigilance import plot_vigilance_hypnogram
-from modules import io_utils, processing, plotting, report, clinical, vigilance
-
 # ---------------- Robust Z-Score Functions ----------------
-from scipy.stats import zscore, pearsonr
-import pandas as pd
-
 def robust_mad(x, constant=1.4826, max_iter=10, tol=1e-3):
     """
     Compute a robust MAD (Median Absolute Deviation) with iterative outlier rejection.
@@ -70,31 +90,16 @@ def robust_zscore(x, use_iqr=False):
 def compute_bandpower_robust_zscores(raw, bands=None, fmin=1, fmax=40, n_fft=2048, use_iqr=False):
     """
     Compute robust z-scores of log bandpower for each channel.
-    
-    Parameters:
-      raw : mne.io.Raw
-        Preprocessed EEG data.
-      bands : dict
-        Frequency bands (default: delta, theta, alpha, beta, gamma).
-      fmin, fmax : float
-        Frequency limits for PSD computation.
-      n_fft : int
-        FFT length.
-      use_iqr : bool
-        If True, use IQR for scaling; otherwise, use MAD.
-    
-    Returns:
-      dict of {band: robust z-scores array}
     """
     if bands is None:
         bands = {
             'delta': (1, 4),
             'theta': (4, 8),
             'alpha': (8, 12),
-            'beta': (12, 30),
-            'gamma': (30, 40)
+            'SMR': (13, 15),
+            'beta': (16, 28),
+            'gamma': (29, 30)
         }
-    # Pass the data array and sfreq to psd_welch
     psds, freqs = psd_welch(raw.get_data(), raw.info['sfreq'], fmin=fmin, fmax=fmax, n_fft=n_fft, verbose=False)
     psds_db = 10 * np.log10(psds)
     robust_features = {}
@@ -134,7 +139,7 @@ def compare_zscores(standard_z, robust_z, clinical_outcomes):
 
 # ---------------- End Robust Z-Score Functions ----------------
 
-# --- Utility: Group EDF files by subject ---
+# --- Utility: Group EDF Files by Subject ---
 def find_subject_edf_files(directory):
     """
     Find and group EDF files by subject.
@@ -153,7 +158,10 @@ def find_subject_edf_files(directory):
             subjects[subject_id]["EC"] = f
     return subjects
 
-def live_eeg_display(stop_event, update_interval=0.7):
+def live_eeg_display(stop_event, update_interval=1.2):
+    """
+    Display a simulated live EEG waveform in the terminal using rich.
+    """
     def generate_eeg_wave(num_points=80):
         x = np.linspace(0, 4 * np.pi, num_points)
         wave = np.sin(x) + np.random.normal(0, 0.3, size=num_points)
@@ -161,7 +169,6 @@ def live_eeg_display(stop_event, update_interval=0.7):
         norm_wave = (wave - wave.min()) / (wave.max() - wave.min() + 1e-10)
         indices = (norm_wave * (len(gradient) - 1)).astype(int)
         return "".join(gradient[i] for i in indices)
-    
     def get_random_quote():
         quotes = [
             "The Dude abides.",
@@ -173,48 +180,13 @@ def live_eeg_display(stop_event, update_interval=0.7):
             "Don’t cross the streams, Walter. I’m seeing delta in my alpha, man.",
             "Calmer than you are? My frontal lobes are lighting up like a bowling alley.",
             "Smokey, this is not 'Nam. This is neurofeedback. There are protocols.",
-            "Obviously you’re not a golfer, or you’d know theta doesn’t spike like that.",
-            "I’m not wrong, Walter. The prefrontal cortex is just... overcooked.",
-             "You want a toe? I can get you a toe. With a clean EEG, by 3 o'clock."
-            "Careful, man, there's a coherence drop in there!",
-            "Eight channels, man. You think the Dude has time for 19?",
-            "This whole brain is out of order!",
-            "That’s not artifact, that’s just the Dude dreaming in delta.",
-            "Shut the f** up, Donny, you're spiking in high beta again.",
-            "You mark that trace zero, you're entering a theta fugue.",
-            "I bowl. I don't analyze cross-frequency coupling.",
-            "This EEG aggression will not stand, man!",
-            "What do you do for recreation? Oh, the usual... meditate, neurofeedback, bowl.",
-            "Donny, you're out of your element—this is neuropsychophysiology!",
-            "You want frontal midline theta? I can get you frontal midline theta, believe me.",
-            "This isn’t 'Nam, this is Clinical Q. There are amplitude thresholds."
-            "It's not rocket science, it's just too much theta. Drink less coffee, meditate more. Boom—clinical.",
-            "If your brain’s not efficient, try turning it off and back on with two minutes of eyes closed alpha.",
-            "All behavior is brain behavior, except for Mondays. Mondays are the devil’s artifact.",
-            "Delta in the front? That’s not enlightenment, that’s executive dysfunction, my friend.",
-            "Do the Clinical Q. It’s like a brain oil change, but with fewer wrenches and more blinking lights."
-            "If you don’t look at the raw EEG, the ghosts of spindle-burst babies will haunt your reports.",
-            "There's a spike in that waveform, but is it epileptiform or just too much espresso?",
-            "This isn't artifact—it's a neurological opera performed by glial cell ballerinas.",
-            "You don’ttreat* ADHD, you negotiate a truce with the thalamus.",
-            "I once saw a guy with 40 Hz gamma in rest state—either a bodhisattva or a malfunctioning router."
-            "Train your brain like a CrossFit junkie, just less sweat and more midline theta.",
-            "You want cognitive gains? Then lift that alpha like it's leg day, bro.",
-            "Your frontal lobes called. They want less doomscrolling and more neurofeedback.",
-            "We’re not hacking your brain. We’re just suggesting politely that it stop freaking out.",
-            "QEEG: because guessing your brain state is so 1990s."
-            "When the beta waves dance too loud, the soul forgets how to whisper.",
-            "An overactive cortex is just a heart trying to solve its feelings with calculus.",
-            "The brain is not broken. It’s just wearing the wrong emotional hat.",
-            "You don’t treat trauma, you compost it in the neuro-garden until it grows flowers.",
-            "Alpha is the silence between thoughts. High beta is a squirrel on espresso playing drums."
+            "Obviously you’re not a golfer, or you’d know theta doesn’t spike like that."
         ]
         return np.random.choice(quotes)
-    
     console = Console()
     with Live(refresh_per_second=10, console=console) as live:
         while not stop_event.is_set():
-            line = generate_eeg_wave(os.get_terminal_size().columns-4)
+            line = generate_eeg_wave(os.get_terminal_size().columns - 4)
             quote = get_random_quote()
             text = f"[bold green]{line}[/bold green]"
             if quote:
@@ -224,48 +196,67 @@ def live_eeg_display(stop_event, update_interval=0.7):
             live.update(panel)
             time.sleep(update_interval)
 
-# Signal handler to set the stop event
+# Signal handler for graceful exit
 def sigint_handler(signum, frame):
     print("SIGINT received, stopping gracefully...")
     stop_event.set()
     sys.exit(0)
 
+# ---------------- Main Processing Pipeline ----------------
 def main():
     parser = argparse.ArgumentParser(
         prog='The Squiggle Interpreter',
-        description='What the program does')
-    parser.add_argument('--csd', help="Use current source density (CSD) for graphs only? (y/n), default is no")
-    parser.add_argument('--zscore', help="z-score normalization method: 1: Standard (mean/std), 2: Robust (MAD-based), 3: Robust (IQR-based), 4: Published Norms (adult norms)")
-    args = parser.parse_args()
-    project_dir = os.getcwd()
-    overall_output_dir = os.path.join(project_dir, "outputs")
-    os.makedirs(overall_output_dir, exist_ok=True)
-    if args.csd is None:
-        csd_choice = input("Use current source density (CSD) for graphs only? (y/n, default n in 5 sec): ")
-        use_csd_for_graphs = True if csd_choice.lower() == "y" else False
-    else:
-        use_csd_for_graphs = True if args.csd == "y" else False
-    print(f"Using CSD for graphs: {use_csd_for_graphs}")
+        description='Comprehensive EEG Analysis & Clinical Report Generation'
+    )
+    parser.add_argument('--csd', help="Use current source density (CSD) for graphs? (y/n)")
+    parser.add_argument('--zscore', help="Z-score normalization method: 1: Standard, 2: Robust (MAD), 3: Robust (IQR), 4: Published Norms")
+    parser.add_argument('--report', help="Generate full clinical report? (y/n)")
+    # Options for CSV export:
+    parser.add_argument('--csv', action='store_true', help="Export EDF data metrics to CSV")
+    parser.add_argument('--edf', help="Path to an EDF file for CSV export")
+    parser.add_argument('--epoch_length', type=float, default=2.0, help="Epoch length (in seconds) for CSV export (default: 2.0)")
+    parser.add_argument('--output_csv', help="Output CSV file path for CSV export")
     
+    args = parser.parse_args()
+    
+    # Prompt for missing parameters
+    if args.csd is None:
+        args.csd = input("Use current source density (CSD) for graphs? (y/n, default: n): ") or "n"
     if args.zscore is None:
-        # Prompt user for z-score normalization method:
         print("Choose z-score normalization method:")
         print("  1: Standard (mean/std)")
         print("  2: Robust (MAD-based)")
         print("  3: Robust (IQR-based)")
         print("  4: Published Norms (adult norms)")
-        method_choice = input("Enter choice (default 1): ") or "1"
-    else:
-        method_choice = args.zscore
+        args.zscore = input("Enter choice (default: 1): ") or "1"
+    if args.report is None:
+        rep = input("Generate full clinical report? (y/n, default: y): ") or "y"
+        args.report = rep.lower()
     
+    # Process CSV export if requested
+    if args.csv:
+        if not args.edf or not args.output_csv:
+            print("For CSV export, please provide both --edf and --output_csv arguments.")
+            sys.exit(1)
+        data_to_csv.process_edf_to_csv(args.edf, args.epoch_length, args.output_csv)
+        sys.exit(0)
+    
+    project_dir = os.getcwd()
+    overall_output_dir = os.path.join(project_dir, "outputs")
+    os.makedirs(overall_output_dir, exist_ok=True)
+    
+    use_csd_for_graphs = True if args.csd.lower() == "y" else False
+    print(f"Using CSD for graphs: {use_csd_for_graphs}")
+    
+    method_choice = args.zscore
     if method_choice == "4":
         published_norm_stats = {
-            "Alpha":    {"median": 20.0, "mad": 4.0},
-            "Theta":    {"median": 16.0, "mad": 3.5},
-            "Delta":    {"median": 22.0, "mad": 5.0},
-            "SMR":      {"median": 7.0,  "mad": 1.5},
-            "Beta":     {"median": 6.0,  "mad": 1.8},
-            "HighBeta": {"median": 4.0,  "mad": 1.2}
+            "Alpha": {"median": 20.0, "mad": 4.0},
+            "Theta": {"median": 16.0, "mad": 3.5},
+            "Delta": {"median": 22.0, "mad": 5.0},
+            "SMR": {"median": 7.0, "mad": 1.5},
+            "Beta": {"median": 6.0, "mad": 1.8},
+            "HighBeta": {"median": 4.0, "mad": 1.2}
         }
         print("Using published normative values for adult EEG (published_norm_stats).")
     else:
@@ -278,6 +269,7 @@ def main():
         subject_folder = os.path.join(overall_output_dir, subject)
         os.makedirs(subject_folder, exist_ok=True)
         
+        # Define output subfolders
         folders = {
             "topomaps_eo": os.path.join(subject_folder, "topomaps", "EO"),
             "topomaps_ec": os.path.join(subject_folder, "topomaps", "EC"),
@@ -297,13 +289,12 @@ def main():
         for folder in folders.values():
             os.makedirs(folder, exist_ok=True)
         
-        # Start live display (optional)
+        # Start live EEG display (optional)
         live_thread = threading.Thread(target=live_eeg_display, args=(stop_event,))
         live_thread.start()
-        
-        # Register the SIGINT handler in the main thread
         signal.signal(signal.SIGINT, sigint_handler)
-        # Use the subject's EDF files.
+        
+        # Select EDF files for EO and EC (if one is missing, use the other)
         eo_file = files["EO"] if files["EO"] else files["EC"]
         ec_file = files["EC"] if files["EC"] else files["EO"]
         print(f"Subject {subject}: EO file: {eo_file}, EC file: {ec_file}")
@@ -312,8 +303,20 @@ def main():
         raw_ec = io_utils.load_eeg_data(os.path.join(project_dir, ec_file), use_csd=False)
         print("Loaded data for subject", subject)
         
-        # --- Compute Bandpower Features & Z-Scores for EO Data ---
-        # Use raw.get_data() and raw.info['sfreq'] when calling psd_welch
+        # Generate full clinical report if requested
+        if args.report.lower() == "y":
+            clinical_report.generate_full_clinical_report()
+        
+        # Compute band power metrics for clinical reports
+        bp_eo = processing.compute_all_band_powers(raw_eo)
+        bp_ec = processing.compute_all_band_powers(raw_ec)
+        print(f"Subject {subject} - Computed band powers for EO channels:", list(bp_eo.keys()))
+        print(f"Subject {subject} - Computed band powers for EC channels:", list(bp_ec.keys()))
+        
+        # Generate clinical site reports (text and CSV)
+        clinical.generate_site_reports(bp_eo, bp_ec, subject_folder)
+        
+        # Compute standard bandpower features for z-score comparisons
         psds, freqs = psd_welch(raw_eo.get_data(), raw_eo.info['sfreq'], fmin=1, fmax=40, n_fft=2048, verbose=False)
         psds_db = 10 * np.log10(psds)
         default_bands = {
@@ -348,14 +351,12 @@ def main():
             print("Invalid choice. Defaulting to standard z-scores.")
             chosen_features = standard_features
         
-        # --- Load Clinical Outcomes (Published or Dummy) ---
         clinical_csv = os.path.join(project_dir, "clinical_outcomes.csv")
         clinical_outcomes = load_clinical_outcomes(clinical_csv, raw_eo.info['nchan'])
-        
         print("Comparing standard vs. chosen z-score method:")
         compare_zscores(standard_features, chosen_features, clinical_outcomes)
-        # --- End Z-Score Comparison ---
         
+        # Optionally apply CSD for graphs
         if use_csd_for_graphs:
             raw_eo_csd = raw_eo.copy().load_data()
             raw_ec_csd = raw_ec.copy().load_data()
@@ -375,18 +376,15 @@ def main():
             raw_eo_csd = raw_eo
             raw_ec_csd = raw_ec
         
-        # --- Integrate Vigilance Module ---
+        # Process vigilance: compute states and save hypnogram
         vigilance_states = vigilance.compute_vigilance_states(raw_eo, epoch_length=2.0)
         fig = vigilance.plot_vigilance_hypnogram(vigilance_states, epoch_length=2.0)
         hypno_path = os.path.join(folders["vigilance"], "vigilance_hypnogram.png")
         fig.savefig(hypno_path, facecolor='black')
         plt.close(fig)
         print(f"Saved vigilance hypnogram to {hypno_path}")
-        
-        print("Vigilance states (time in s, stage):")
         for t, stage in vigilance_states:
             print(f"{t:5.1f}s: {stage}")
-        
         try:
             fig_hypno = vigilance.plot_vigilance_hypnogram(vigilance_states, epoch_length=2.0)
             vigilance_hypno_path = os.path.join(folders["vigilance"], "vigilance_hypnogram.png")
@@ -396,13 +394,7 @@ def main():
         except AttributeError:
             print("Error: 'plot_vigilance_hypnogram' not found in modules.vigilance.")
         
-        bp_eo = processing.compute_all_band_powers(raw_eo)
-        bp_ec = processing.compute_all_band_powers(raw_ec)
-        print(f"Subject {subject} - Computed band powers for EO channels:", list(bp_eo.keys()))
-        print(f"Subject {subject} - Computed band powers for EC channels:", list(bp_ec.keys()))
-        
-        clinical.generate_site_reports(bp_eo, bp_ec, subject_folder)
-        
+        # Process topomaps for EO
         band_list = list(processing.BANDS.keys())
         for band in band_list:
             abs_eo = [bp_eo[ch][band] for ch in raw_eo.ch_names]
@@ -415,18 +407,8 @@ def main():
             fig_topo_eo.savefig(eo_topo_path, facecolor='black')
             plt.close(fig_topo_eo)
             print(f"Subject {subject}: Saved EO topomap for {band} to {eo_topo_path}")
-            
-            abs_ec = [bp_ec[ch][band] for ch in raw_ec.ch_names]
-            rel_ec = []
-            for ch in raw_ec.ch_names:
-                total_power = sum(bp_ec[ch][b] for b in band_list)
-                rel_ec.append(bp_ec[ch][band] / total_power if total_power else 0)
-            fig_topo_ec = plotting.plot_topomap_abs_rel(abs_ec, rel_ec, raw_ec.info, band, "EC")
-            ec_topo_path = os.path.join(folders["topomaps_ec"], f"topomap_{band}.png")
-            fig_topo_ec.savefig(ec_topo_path, facecolor='black')
-            plt.close(fig_topo_ec)
-            print(f"Subject {subject}: Saved EC topomap for {band} to {ec_topo_path}")
         
+        # Process waveform grids for EO
         global_waveforms = {}
         data_eo = raw_eo.get_data() * 1e6
         sfreq = raw_eo.info['sfreq']
@@ -438,6 +420,7 @@ def main():
             global_waveforms[band] = os.path.basename(wf_path)
             print(f"Subject {subject}: Saved EO waveform grid for {band} to {wf_path}")
         
+        # Process ERP for EO and EC
         erp_eo_fig = processing.compute_pseudo_erp(raw_eo)
         erp_eo_path = os.path.join(folders["erp"], "erp_EO.png")
         erp_eo_fig.savefig(erp_eo_path, facecolor='black')
@@ -450,6 +433,7 @@ def main():
         plt.close(erp_ec_fig)
         print(f"Subject {subject}: Saved ERP EC to {erp_ec_path}")
         
+        # Process coherence matrices for EO and EC
         coherence_maps = {"EO": {}, "EC": {}}
         for band in band_list:
             band_range = processing.BANDS[band]
@@ -469,6 +453,7 @@ def main():
             coherence_maps["EC"][band] = os.path.basename(coh_path_ec)
             print(f"Subject {subject}: Saved EC coherence ({band}) to {coh_path_ec}")
         
+        # Process robust z-score topomaps for EO and EC
         if published_norm_stats is not None:
             norm_stats = published_norm_stats
         else:
@@ -500,6 +485,7 @@ def main():
                 zscore_images_ec[band] = os.path.basename(zscore_path_ec)
                 print(f"Subject {subject}: Saved EC z-score ({band}) to {zscore_path_ec}")
         
+        # Process TFR maps for EO and EC
         n_cycles = 2.0
         tfr_maps_eo = processing.compute_all_tfr_maps(raw_eo, n_cycles, tmin=0.0, tmax=4.0)
         tfr_maps_ec = processing.compute_all_tfr_maps(raw_ec, n_cycles, tmin=0.0, tmax=4.0)
@@ -525,6 +511,7 @@ def main():
             else:
                 print(f"Subject {subject}: TFR EC for {band} was not computed.")
         
+        # Process ICA for EO
         ica = processing.compute_ica(raw_eo)
         fig_ica = plotting.plot_ica_components(ica, raw_eo)
         ica_path = os.path.join(folders["ica_eo"], "ica_EO.png")
@@ -532,6 +519,7 @@ def main():
         plt.close(fig_ica)
         print(f"Subject {subject}: Saved ICA EO to {ica_path}")
         
+        # Process source localization for EO and EC
         raw_source_eo = raw_eo.copy()
         raw_source_ec = raw_ec.copy()
         raw_source_eo.set_eeg_reference("average", projection=False)
@@ -559,7 +547,7 @@ def main():
         inv_op_eo = processing.compute_inverse_operator(raw_source_eo, fwd_eo, cov_eo)
         inv_op_ec = processing.compute_inverse_operator(raw_source_ec, fwd_ec, cov_eo)
         
-        source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eloreta"}
+        source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eLORETA"}
         source_localization = {"EO": {}, "EC": {}}
         for cond, raw_data, inv_op in [("EO", raw_eo, inv_op_eo), ("EC", raw_ec, inv_op_ec)]:
             for band in band_list:
@@ -587,9 +575,11 @@ def main():
         print("Source Localization dictionary:")
         print(source_localization)
         
+        # Generate detailed per-site reports
         from modules.clinical import generate_full_site_reports
         generate_full_site_reports(raw_eo, raw_ec, folders["detailed"])
         
+        # Build site dictionary for report
         site_list = raw_eo.ch_names
         site_dict = {}
         for site in site_list:
@@ -599,6 +589,7 @@ def main():
                 wave_path = os.path.join("detailed_site_plots", site, "Waveform_Overlay", f"{site}_Waveform_{b}.png")
                 site_dict[site][b] = {"psd": psd_path, "wave": wave_path}
         
+        # Build final report data dictionary for HTML report
         report_data = {
             "global_topomaps": {
                 "EO": {b: os.path.basename(os.path.join(folders["topomaps_eo"], f"topomap_{b}.png")) for b in band_list},
@@ -655,4 +646,5 @@ def main():
         print("Live EEG display stopped for subject", subject)
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, sigint_handler)
     main()
