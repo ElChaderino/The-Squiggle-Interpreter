@@ -58,6 +58,8 @@
     var siteList = {{ site_list | tojson }};
     var bandList = {{ band_list | tojson }};
     var siteDict = {{ site_dict | tojson }};
+	var phenotype = {{ phenotype | default({}) | tojson }};
+;
     
     // ---------------------------
     // 2) PATHS PASSED FROM PYTHON
@@ -365,5 +367,32 @@
     <h3>Site Waveform Plot</h3>
     <img id="siteWaveImg" src="" alt="Site Waveform Plot">
   </div>
+
+<!-- Phenotype Classification Section -->
+<div class="container">
+  <h2 class="section-title">Phenotype Classification</h2>
+  <pre id="phenotypeDisplay" style="text-align: left; background-color: #111; padding: 15px; border: 1px solid #555;"></pre>
+</div>
+
+<script>
+  function displayPhenotype() {
+    const pheno = JSON.stringify(phenotype, null, 2);
+    document.getElementById("phenotypeDisplay").innerText = pheno || "No phenotype data found.";
+  }
+
+  window.onload = function() {
+    populateGlobalTopomapDropdowns();
+    populateGlobalWaveDropdowns();
+    populateGlobalCohDropdowns();
+    populateGlobalERPDropdowns();
+    populateZscoreDropdowns();
+    populateTfrDropdowns();
+    populateIcaDropdowns();
+    populateSourceDropdowns();
+    populateSiteDropdowns();
+    displayPhenotype();
+  };
+</script>
 </body>
+
 </html>
