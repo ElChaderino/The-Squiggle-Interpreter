@@ -34,6 +34,8 @@ from pathlib import Path
 from modules import clinical_report    # Clinical report module integrating pyramid mappings
 from modules import pyramid_model      # Pyramid mapping module
 from modules import data_to_csv        # Module for EDF-to-CSV conversion
+from modules import phenotype
+from modules.phenotype import classify_eeg_profile
 
 from modules.vigilance import plot_vigilance_hypnogram
 from modules import io_utils, processing, plotting, report, clinical, vigilance
@@ -315,6 +317,30 @@ def main():
         
         # Generate clinical site reports (text and CSV)
         clinical.generate_site_reports(bp_eo, bp_ec, subject_folder)
+
+        # --- Phenotype Classification ---
+        from modules import phenotype
+        from modules.feature_extraction import extract_classification_features
+
+
+        features = extract_classification_features(raw_eo, [])
+        phenotype_results = classify_eeg_profile(features)
+
+        phenotype_report_path = os.path.join(subject_folder, f"{subject}_phenotype.txt")
+        with open(phenotype_report_path, "w", encoding="utf-8") as f:
+            f.write("Phenotype Classification Results\n")
+            f.write("===============================\n")
+            for k, v in phenotype_results.items():
+                f.write(f"{k}: {v}\n")
+
+        # Append phenotype to main clinical report .txt file
+        clinical_txt_path = os.path.join(subject_folder, f"{subject}_clinical_report.txt")
+        with open(clinical_txt_path, "a", encoding="utf-8") as f:
+            f.write("\n\nPhenotype Classification Results\n")
+            f.write("===============================\n")
+            for k, v in phenotype_results.items():
+                f.write(f"{k}: {v}\n")
+        
         
         # Compute standard bandpower features for z-score comparisons
         psds, freqs = psd_welch(raw_eo.get_data(), raw_eo.info['sfreq'], fmin=1, fmax=40, n_fft=2048, verbose=False)
