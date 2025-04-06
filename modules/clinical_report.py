@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 from typing import Dict, Tuple, List
 import mne
+from . import pdf_report_builder
 
 from . import pyramid_model  # Relative import since both are in the 'modules' directory
 from . import processing, plotting  # Assumes these modules exist in 'modules'
