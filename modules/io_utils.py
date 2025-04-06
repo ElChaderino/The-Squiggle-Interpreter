@@ -20,10 +20,11 @@ def find_subject_edf_files(directory):
             print(f"File {f} did not match expected naming convention.")
     return subjects
 
-def load_eeg_data(edf_file, use_csd=False, for_source=False):
+def load_eeg_data(edf_file, use_csd=False, for_source=False, apply_filter=True):
     """
     Load an EDF file, remove "-LE" from channel names, fix channel unit issues,
-    force all channels to EEG, apply the standard 10–20 montage, and re-reference the data.
+    force all channels to EEG, apply the standard 10–20 montage, optionally apply a high-pass filter,
+    and re-reference the data.
     
     If for_source is True, it will permanently re-reference the data (projection=False)
     without adding any reference projection (needed for source localization).
@@ -33,6 +34,7 @@ def load_eeg_data(edf_file, use_csd=False, for_source=False):
         edf_file (str): Path to the EDF file.
         use_csd (bool): If True, attempt to compute current source density (CSD) for graphing.
         for_source (bool): If True, do not add the reference projection (for source localization).
+        apply_filter (bool): If True, apply a high-pass filter (default: True).
         
     Returns:
         mne.io.Raw: The loaded and preprocessed Raw object.
@@ -80,6 +82,11 @@ def load_eeg_data(edf_file, use_csd=False, for_source=False):
     else:
         raw.set_eeg_reference("average", projection=True)
         raw.apply_proj()
+    
+    # Optionally apply a high-pass filter if requested.
+    if apply_filter:
+        raw.filter(l_freq=1.0, h_freq=None, verbose=False)
+        print(f"Applied high-pass filter (1 Hz) to {edf_file}")
     
     # Optionally compute current source density (CSD) for graphing.
     if use_csd:
