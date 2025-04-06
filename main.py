@@ -774,7 +774,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
 
     if config['report']:
         # Updated call: pass use_csd and apply_filter parameters
-        clinical_report.generate_full_clinical_report(config['csd'], True)
+        clinical_report.generate_full_clinical_report(config['csd'], True, subject_folder, subject)
 
     clinical.generate_full_site_reports(raw_eo, raw_ec, folders["detailed"])
 
