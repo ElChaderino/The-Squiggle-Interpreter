@@ -58,9 +58,8 @@
     var siteList = {{ site_list | tojson }};
     var bandList = {{ band_list | tojson }};
     var siteDict = {{ site_dict | tojson }};
-	var phenotype = {{ phenotype | default({}) | tojson }};
-;
-    
+    var phenotype = {{ phenotype | default({}) | tojson }};
+
     // ---------------------------
     // 2) PATHS PASSED FROM PYTHON
     // ---------------------------
@@ -70,9 +69,9 @@
     var erpPath         = "{{ global_erp_path }}";          // e.g., "erp"
     var tfrPath         = "{{ tfr_path }}";                 // e.g., "tfr"
     var icaPath         = "{{ ica_path }}";                 // e.g., "ica"
-    var sourcePath      = "{{ source_path }}";              // Updated variable name (was source_localization_path)
+    var sourcePath      = "{{ source_path }}";              // e.g., "source_localization"
     var sitesPath       = "{{ sites_path }}";               // e.g., ""
-    
+
     // ---------------------------
     // 3) UTILITY FUNCTIONS
     // ---------------------------
@@ -86,7 +85,7 @@
         sel.appendChild(opt);
       });
     }
-    
+
     // ---------------------------
     // GLOBAL TOPOMAPS
     // ---------------------------
@@ -101,7 +100,7 @@
       var imgName = globalTopomaps[cond][band];
       document.getElementById("globalTopoImg").src = topomapsPath + "/" + cond + "/" + imgName;
     }
-    
+
     // ---------------------------
     // GLOBAL WAVEFORMS
     // ---------------------------
@@ -115,7 +114,7 @@
       var imgName = globalWaveforms[band];
       document.getElementById("globalWaveImg").src = waveformsPath + "/EO/" + imgName;
     }
-    
+
     // ---------------------------
     // GLOBAL COHERENCE
     // ---------------------------
@@ -135,7 +134,7 @@
         document.getElementById("globalCohImg").src = "";
       }
     }
-    
+
     // ---------------------------
     // GLOBAL ERP
     // ---------------------------
@@ -148,7 +147,7 @@
       var imgName = globalERP[cond];
       document.getElementById("erpImg").src = erpPath + "/" + imgName;
     }
-    
+
     // ---------------------------
     // Z-SCORE MAPS
     // ---------------------------
@@ -167,7 +166,7 @@
         document.getElementById("zscoreImg").src = "";
       }
     }
-    
+
     // ---------------------------
     // TFR
     // ---------------------------
@@ -186,7 +185,7 @@
         document.getElementById("tfrImg").src = "";
       }
     }
-    
+
     // ---------------------------
     // ICA
     // ---------------------------
@@ -203,7 +202,7 @@
         document.getElementById("icaImg").src = "";
       }
     }
-    
+
     // ---------------------------
     // SOURCE LOCALIZATION
     // ---------------------------
@@ -215,10 +214,9 @@
       updateSourceImage();
     }
     function updateSourceImage() {
-      var cond   = document.getElementById("sourceCond").value; 
-      var band   = document.getElementById("sourceBand").value; 
+      var cond   = document.getElementById("sourceCond").value;
+      var band   = document.getElementById("sourceBand").value;
       var method = document.getElementById("sourceMethod").value;
-      
       if (sourceLocalization[cond] && sourceLocalization[cond][band] && sourceLocalization[cond][band][method]) {
         var imgName = sourceLocalization[cond][band][method];
         var fullPath = sourcePath + "/" + imgName;
@@ -229,18 +227,21 @@
         console.log("No source localization image found for", cond, band, method);
       }
     }
-    
+
     // ---------------------------
     // PER-SITE ANALYSIS
     // ---------------------------
     function populateSiteDropdowns() {
       populateDropdown("siteSelect", siteList);
       populateDropdown("bandSelect", bandList);
+      populateDropdown("siteDiffSelect", bandList);
       updateSiteImages();
     }
     function updateSiteImages() {
       var site = document.getElementById("siteSelect").value;
       var band = document.getElementById("bandSelect").value;
+      var diffBand = document.getElementById("siteDiffSelect").value;
+
       if (siteDict[site] && siteDict[site][band]) {
         document.getElementById("sitePsdImg").src = siteDict[site][band]["psd"];
         document.getElementById("siteWaveImg").src = siteDict[site][band]["wave"];
@@ -248,8 +249,18 @@
         document.getElementById("sitePsdImg").src = "";
         document.getElementById("siteWaveImg").src = "";
       }
+
+      if (siteDict[site] && siteDict[site][diffBand]) {
+        // Here, we assume that for the chosen difference band, the dictionary contains two keys:
+        // "diff_topo" and "diff_bar". We'll update two separate image elements.
+        document.getElementById("siteDiffTopoImg").src = siteDict[site][diffBand]["diff_topo"];
+        document.getElementById("siteDiffBarImg").src = siteDict[site][diffBand]["diff_bar"];
+      } else {
+        document.getElementById("siteDiffTopoImg").src = "";
+        document.getElementById("siteDiffBarImg").src = "";
+      }
     }
-    
+
     // ---------------------------
     // ON WINDOW LOAD
     // ---------------------------
@@ -263,7 +274,13 @@
       populateIcaDropdowns();
       populateSourceDropdowns();
       populateSiteDropdowns();
+      displayPhenotype();
     };
+
+    function displayPhenotype() {
+      const pheno = JSON.stringify(phenotype, null, 2);
+      document.getElementById("phenotypeDisplay").innerText = pheno || "No phenotype data found.";
+    }
   </script>
 </head>
 <body>
@@ -358,7 +375,7 @@
     <h2>Per-Site Analysis</h2>
     <label for="siteSelect">Site:</label>
     <select id="siteSelect" onchange="updateSiteImages()"></select>
-    <label for="bandSelect">Band:</label>
+    <label for="bandSelect">Band (PSD/Waveform):</label>
     <select id="bandSelect" onchange="updateSiteImages()"></select>
     <br>
     <h3>Site PSD Plot</h3>
@@ -366,13 +383,22 @@
     <br>
     <h3>Site Waveform Plot</h3>
     <img id="siteWaveImg" src="" alt="Site Waveform Plot">
+    <br>
+    <label for="siteDiffSelect">Difference Band:</label>
+    <select id="siteDiffSelect" onchange="updateSiteImages()"></select>
+    <br>
+    <h3>Site Difference Topomap</h3>
+    <img id="siteDiffTopoImg" src="" alt="Site Difference Topomap">
+    <br>
+    <h3>Site Difference Bar Graph</h3>
+    <img id="siteDiffBarImg" src="" alt="Site Difference Bar Graph">
   </div>
 
-<!-- Phenotype Classification Section -->
-<div class="container">
-  <h2 class="section-title">Phenotype Classification</h2>
-  <pre id="phenotypeDisplay" style="text-align: left; background-color: #111; padding: 15px; border: 1px solid #555;"></pre>
-</div>
+  <!-- Phenotype Classification Section -->
+  <div class="container">
+    <h2 class="section-title">Phenotype Classification</h2>
+    <pre id="phenotypeDisplay" style="text-align: left; background-color: #111; padding: 15px; border: 1px solid #555;"></pre>
+  </div>
 
 <script>
   function displayPhenotype() {
@@ -394,5 +420,4 @@
   };
 </script>
 </body>
-
 </html>
