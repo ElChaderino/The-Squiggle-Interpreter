@@ -180,6 +180,7 @@ Improved EDF Grouping: Enhanced grouping of EDF files by subject based on consis
 ![ICA Components](https://github.com/user-attachments/assets/57954ad2-0fba-4cb9-9bee-bafbb8443a19)
 ![Loreta](https://github.com/user-attachments/assets/d7ff2947-15ac-4c23-bb2f-dd48088e9cac)
 ![PerSite PSD and Plot](https://github.com/user-attachments/assets/499084db-cf93-42d6-83ed-542d500250fa)
+![Difference topo and bar](https://github.com/user-attachments/assets/b5257d7b-5839-41b6-832d-d1b76d026928)
 
 
 Video old concept scripts in action
