@@ -1,4 +1,11 @@
-# pipeline.py
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+pipeline.py
+A central subject processing pipeline that applies CSD, extracts features,
+classifies EEG phenotype, and generates various reports.
+"""
+
 import os
 import numpy as np
 import mne
@@ -8,9 +15,25 @@ from report_writer import format_phenotype_section, write_html_report
 from modules import processing, plotting, clinical, report
 
 
-def process_subject(subject_id, raw_eo, raw_ec, raw_eo_csd, raw_ec_csd, args, folders, project_dir, source_localization, vigilance_states):
+def process_subject(subject_id, raw_eo, raw_ec, raw_eo_csd, raw_ec_csd, args, folders, project_dir, source_localization,
+                    vigilance_states):
     """
-    Central subject pipeline: applies CSD, extracts features, classifies, generates all reports
+    Central subject pipeline: applies CSD, extracts features, classifies, generates all reports.
+
+    Parameters:
+        subject_id (str): Identifier for the subject.
+        raw_eo (mne.io.Raw): Preprocessed raw data for Eyes Open.
+        raw_ec (mne.io.Raw): Preprocessed raw data for Eyes Closed.
+        raw_eo_csd (mne.io.Raw): CSD-transformed raw data for Eyes Open (for graphing).
+        raw_ec_csd (mne.io.Raw): CSD-transformed raw data for Eyes Closed (for graphing).
+        args (Namespace): Command-line arguments or configuration.
+        folders (dict): Dictionary of output folders (including 'base' and 'detailed').
+        project_dir (str): Project directory path.
+        source_localization (dict): Source localization results.
+        vigilance_states (list): Computed vigilance state data.
+
+    Returns:
+        dict: A summary dictionary including subject ID, phenotype classification, and band power data.
     """
     # Shared band definitions
     band_list = list(processing.BANDS.keys())
@@ -53,8 +76,7 @@ def process_subject(subject_id, raw_eo, raw_ec, raw_eo_csd, raw_ec_csd, args, fo
     generate_full_site_reports(raw_eo, raw_ec, folders['detailed'])
 
     # --- Topomaps, z-scores, TFR, ICA, etc. ---
-    # Reuse same bandpower and processing as before (modularize if needed)
-    # Future: these could move here from main.py if fully offloaded
+    # (Additional processing can be modularized here in the future)
 
     # --- Return summary if needed ---
     return {
