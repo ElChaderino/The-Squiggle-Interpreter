@@ -16,8 +16,9 @@ Ensure this file is saved with UTF-8 encoding.
 
 import argparse
 import numpy as np
-import mne
 import pandas as pd
+import mne
+from modules import io_utils
 
 # Define frequency bands
 BANDS = {
@@ -29,10 +30,11 @@ BANDS = {
     "HighBeta": (28, 38)
 }
 
+
 def compute_band_power(data, sfreq, band):
     """
     Compute the mean power in the given frequency band.
-    
+
     Parameters:
         data : 1D numpy array
             Signal data.
@@ -40,20 +42,22 @@ def compute_band_power(data, sfreq, band):
             Sampling frequency.
         band : tuple (fmin, fmax)
             Frequency band limits.
-            
+
     Returns:
         float: Mean power in the band.
     """
     fmin, fmax = band
+    # Apply bandpass filtering using MNE's filter function
     filtered = mne.filter.filter_data(data, sfreq, fmin, fmax, verbose=False)
     power = np.mean(filtered ** 2)
     return power
+
 
 def process_edf_to_csv(edf_path, epoch_length, output_csv):
     """
     Load an EDF file, segment the data into epochs of length epoch_length (in seconds),
     compute band power for each channel in each epoch, and write the results to a CSV file.
-    
+
     Parameters:
         edf_path : str
             Path to the EDF file.
@@ -62,19 +66,17 @@ def process_edf_to_csv(edf_path, epoch_length, output_csv):
         output_csv : str
             Output CSV file path.
     """
-    # Load EDF data
-    raw = mne.io.read_raw_edf(edf_path, preload=True, verbose=False)
-    # Set a standard montage and average reference
-    montage = mne.channels.make_standard_montage("standard_1020")
-    raw.set_montage(montage, match_case=False)
-    raw.set_eeg_reference("average", projection=True)
-    
+    # Use io_utils.load_eeg_data to load and preprocess the EDF data.
+    # Here, we do not need to apply CSD (use_csd=False) and we want to apply the high-pass filter.
+    raw = io_utils.load_eeg_data(edf_path, use_csd=False, for_source=False, apply_filter=True)
+
+    # Get sampling frequency
     sfreq = raw.info["sfreq"]
-    
-    # Create fixed-length epochs
+
+    # Create fixed-length events and epochs
     events = mne.make_fixed_length_events(raw, duration=epoch_length, verbose=False)
     epochs = mne.Epochs(raw, events, tmin=0, tmax=epoch_length, baseline=None, preload=True, verbose=False)
-    
+
     rows = []
     # Loop over epochs
     for i, epoch in enumerate(epochs.get_data()):
@@ -93,10 +95,12 @@ def process_edf_to_csv(edf_path, epoch_length, output_csv):
                 power = compute_band_power(epoch[ch_idx, :], sfreq, band_range)
                 row[band_name] = power
             rows.append(row)
-    
+
+    # Create a DataFrame and export to CSV
     df = pd.DataFrame(rows)
     df.to_csv(output_csv, index=False)
     print(f"CSV file saved to {output_csv}")
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -106,8 +110,9 @@ def main():
     parser.add_argument("--epoch_length", type=float, default=2.0, help="Epoch length in seconds (default: 2.0)")
     parser.add_argument("--output", required=True, help="Output CSV file path")
     args = parser.parse_args()
-    
+
     process_edf_to_csv(args.edf, args.epoch_length, args.output)
+
 
 if __name__ == "__main__":
     main()
