@@ -141,7 +141,7 @@ def compute_band_power(data: np.ndarray, sfreq: float, band: Tuple[float, float]
     """Compute mean power for a frequency band."""
     fmin, fmax = band
     data_filt = mne.filter.filter_data(data, sfreq, fmin, fmax, verbose=False)
-    return float(np.mean(data_filt**2))
+    return float(np.mean(data_filt ** 2))
 
 
 def compute_all_band_powers(raw: mne.io.Raw) -> Dict[str, Dict[str, float]]:
@@ -177,7 +177,7 @@ def compute_alpha_peak_frequency(data: np.ndarray, sfreq: float, freq_range: Tup
 
 
 def compute_frontal_asymmetry(
-    bp_EO: Dict[str, Dict[str, float]], ch_left: str = "F3", ch_right: str = "F4"
+        bp_EO: Dict[str, Dict[str, float]], ch_left: str = "F3", ch_right: str = "F4"
 ) -> float:
     """
     Compute frontal asymmetry as log(right/left) Alpha power for EO condition.
@@ -201,7 +201,7 @@ def compute_frontal_asymmetry(
 
 
 def compute_site_metrics(
-    raw_eo: mne.io.Raw, raw_ec: mne.io.Raw, bp_EO: Dict, bp_EC: Dict
+        raw_eo: mne.io.Raw, raw_ec: mne.io.Raw, bp_EO: Dict, bp_EC: Dict
 ) -> Tuple[Dict, Dict]:
     """
     Compute site-specific and global metrics based on band power and raw data for EO and EC.
@@ -233,7 +233,19 @@ def compute_site_metrics(
     global_metrics = {}
     sfreq = raw_eo.info["sfreq"]
 
+    # Log channels missing from EC data to a file
+    missing_ec_channels = set(bp_EO.keys()) - set(bp_EC.keys())
+    if missing_ec_channels:
+        with open("missing_channels_log.txt", "a") as f:
+            for ch in missing_ec_channels:
+                f.write(f"{ch} missing from EC\n")
+
     for ch in bp_EO.keys():
+        if ch not in bp_EC:
+            with open("missing_channels_log.txt", "a") as f:
+                f.write(f"{ch} missing from EC\n")
+            continue
+
         site_metrics[ch] = {}
         # Alpha Change (EO → EC)
         alpha_EO = bp_EO[ch].get("Alpha", 0)
@@ -587,7 +599,7 @@ def remove_overlapping_channels(info: mne.Info, tol: float = 0.05) -> Tuple[mne.
 
 
 def plot_topomap_abs_rel(
-    abs_vals: np.ndarray, rel_vals: np.ndarray, info: mne.Info, band_name: str, cond_name: str, output_path: Path
+        abs_vals: np.ndarray, rel_vals: np.ndarray, info: mne.Info, band_name: str, cond_name: str, output_path: Path
 ) -> None:
     """Plot side-by-side topomaps of absolute and relative power for a given band."""
     info_clean, sel_idx = remove_overlapping_channels(info)
@@ -637,10 +649,16 @@ def generate_full_site_plots(raw_eo: mne.io.Raw, raw_ec: mne.io.Raw, output_dir:
         output_dir (Path): Base directory where per-site plots will be saved.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    channels = raw_eo.ch_names
+    channels = raw_eo.ch_names  # Start with EO channels
     sfreq = raw_eo.info["sfreq"]
 
     for ch in channels:
+        # Skip channels missing in either EO or EC
+        if ch not in raw_ec.ch_names or ch not in raw_eo.ch_names:
+            with open("missing_channels_log.txt", "a") as f:
+                f.write(f"{ch} missing in EO or EC for plotting\n")
+            continue
+
         # Create subfolders for each channel/site
         ch_folder = output_dir / ch
         psd_folder = ch_folder / "PSD_Overlay"
@@ -720,19 +738,26 @@ def get_pyramid_mapping_section() -> str:
         ])
     return "\n".join(lines)
 
-
-def generate_full_clinical_report(use_csd: bool, apply_filter: bool) -> None:
+def _generate_clinical_report(report_output_dir: Path, use_csd: bool, apply_filter: bool) -> None:
     """Generate and save the full clinical report with topomaps and per-site plots."""
-    # Determine project root and set output directory
-    project_root = get_project_root()
-    report_output_dir = project_root / "outputs" / "report"
+
+    # Ensure clinical report base folder exists
     report_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find EDF files in the project root
+    # Define folders *within* the clinical report directory
+    topomap_dir = report_output_dir / "topomaps"
+    site_plot_dir = report_output_dir / "site_plots"
+
+    # Create those subfolders
+    topomap_dir.mkdir(parents=True, exist_ok=True)
+    site_plot_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- Load EDFs ---
+    project_root = get_project_root()
     edf_dict = find_edf_files(project_root)
+
     if not any(edf_dict.values()):
         sys.exit("Error: No EDF files found in the project directory.")
-
     if edf_dict["EO"] is None:
         edf_dict["EO"] = edf_dict["EC"]
         print("Using EC file for EO.")
@@ -745,64 +770,90 @@ def generate_full_clinical_report(use_csd: bool, apply_filter: bool) -> None:
     bp_EO = compute_all_band_powers(raw_eo)
     bp_EC = compute_all_band_powers(raw_ec)
 
-    # Compute site-specific and global metrics
+    # --- Metrics ---
     site_metrics, global_metrics = compute_site_metrics(raw_eo, raw_ec, bp_EO, bp_EC)
-
-    # Generate interpretations and save metrics
     interpretations = interpret_metrics(site_metrics, global_metrics, bp_EO, bp_EC)
+
+    # Save metrics and text to report_output_dir (same folder)
     csv_path = report_output_dir / "clinical_metrics.csv"
+    report_text_path = report_output_dir / "clinical_report.txt"
+
     save_site_metrics(site_metrics, global_metrics, csv_path)
+    with open(report_text_path, "w", encoding="utf-8") as f:
+        f.write("\n".join([
+            "==============================================",
+            "           Clinical EEG Report",
+            "==============================================",
+            *interpretations,
+            "\n",
+            get_pyramid_mapping_section(),
+        ]))
 
-    # Generate per-site plots (PSD, waveform, difference)
-    generate_full_site_plots(raw_eo, raw_ec, report_output_dir / "site_plots")
+    # --- Site plots ---
+    generate_full_site_plots(raw_eo, raw_ec, site_plot_dir)
 
-    # Compute absolute and relative power for topomaps
-    channels = list(bp_EO.keys())
+    # --- Topomaps ---
+    common_channels = sorted(list(set(bp_EO.keys()) & set(bp_EC.keys())))
+    raw_eo_common = raw_eo.copy().pick_channels(common_channels)
+    raw_ec_common = raw_ec.copy().pick_channels(common_channels)
+
     for band in BANDS:
-        eo_abs = np.array([bp_EO[ch][band] for ch in channels])
-        ec_abs = np.array([bp_EC[ch][band] for ch in channels])
-        eo_total = np.array([sum(bp_EO[ch].values()) for ch in channels])
-        ec_total = np.array([sum(bp_EC[ch].values()) for ch in channels])
+        eo_abs = np.array([bp_EO[ch][band] for ch in common_channels])
+        ec_abs = np.array([bp_EC[ch][band] for ch in common_channels])
+        eo_total = np.array([sum(bp_EO[ch].values()) for ch in common_channels])
+        ec_total = np.array([sum(bp_EC[ch].values()) for ch in common_channels])
         eo_rel = eo_abs / eo_total * 100 if np.any(eo_total) else np.zeros_like(eo_abs)
         ec_rel = ec_abs / ec_total * 100 if np.any(ec_total) else np.zeros_like(ec_abs)
 
-        # Plot topomaps
         plot_topomap_abs_rel(
-            eo_abs, eo_rel, raw_eo.info, band, "EO",
-            report_output_dir / f"topomap_{band}_EO.png"
+            eo_abs, eo_rel, raw_eo_common.info, band, "EO",
+            topomap_dir / f"topomap_{band}_EO.png"
         )
         plot_topomap_abs_rel(
-            ec_abs, ec_rel, raw_ec.info, band, "EC",
-            report_output_dir / f"topomap_{band}_EC.png"
+            ec_abs, ec_rel, raw_ec_common.info, band, "EC",
+            topomap_dir / f"topomap_{band}_EC.png"
         )
 
-    # Compile the full report
-    full_report = [
-        "==============================================",
-        "           Clinical EEG Report",
-        "==============================================",
-        *interpretations,
-        "\n",
-        get_pyramid_mapping_section(),
-    ]
+    # --- Build PDF Report ---
+    pdf_report_builder.build_pdf_report(report_output_dir)
 
-    report_text_path = report_output_dir / "clinical_report.txt"
-    with open(report_text_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(full_report))
+    # --- Final output summary ---
+    print(f"\n✅ Clinical report saved in: {report_output_dir}")
+    print(f"   - PDF: clinical_report.pdf")
+    print(f"   - Report: clinical_report.txt")
+    print(f"   - Metrics CSV: clinical_metrics.csv")
+    print(f"   - Topomaps: {topomap_dir}")
+    print(f"   - Site plots: {site_plot_dir}")
 
-    print(f"✅ Report generated:\n  Text: {report_text_path}\n  CSV: {csv_path}")
-    print(f"Topomaps saved in: {report_output_dir}")
-    print(f"Per-site plots saved in: {report_output_dir / 'site_plots'}")
+
+def generate_full_clinical_report(*args, **kwargs):
+    """
+    Supports both CLI-style (Path, use_csd, apply_filter) and main.py-style
+    (use_csd, apply_filter, subject_folder, subject).
+    """
+    if len(args) == 3 and isinstance(args[0], Path):
+        return _generate_clinical_report(args[0], args[1], args[2])
+    elif len(args) == 4:
+        use_csd, apply_filter, subject_folder, subject = args
+        output_dir = Path(subject_folder)
+        return _generate_clinical_report(output_dir, use_csd, apply_filter)
+    else:
+        raise TypeError("Invalid arguments for generate_full_clinical_report")
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Clinical EEG Report Generator")
     parser.add_argument("--no-csd", action="store_true", help="Disable CSD transform")
     parser.add_argument("--no-filter", action="store_true", help="Disable high-pass filter")
+    parser.add_argument("--outdir", type=str, required=True, help="Output directory for all report files")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    generate_full_clinical_report(use_csd=not args.no_csd, apply_filter=not args.no_filter)
+    generate_full_clinical_report(Path(args.outdir), use_csd=not args.no_csd, apply_filter=not args.no_filter)
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    generate_full_clinical_report(Path(args.outdir), use_csd=not args.no_csd, apply_filter=not args.no_filter)
