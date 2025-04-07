@@ -425,6 +425,11 @@ def load_zscore_stats(method_choice):
         }
 
 
+from modules import io_utils
+from modules.montage_tools import validate_montage_for_csd_loreta  # New import
+import mne
+import os
+
 def load_and_preprocess_data(project_dir, files, use_csd):
     eo_file = files["EO"] if files["EO"] else files["EC"]
     ec_file = files["EC"] if files["EC"] else files["EO"]
@@ -444,6 +449,31 @@ def load_and_preprocess_data(project_dir, files, use_csd):
         print("Failed to load both EO and EC data.")
         return None, None, None, None
 
+    # Validate montages before CSD (logs issues but doesn’t block unless strict)
+    if use_csd:
+        if raw_eo:
+            is_valid, status = validate_montage_for_csd_loreta(raw_eo)
+            print(f"EO Montage Validation: {'✅ Ready' if is_valid else '⚠️ Issues'}")
+            if not is_valid:
+                with open(os.path.join(project_dir, "montage_validation_log.txt"), "a") as log:
+                    log.write(f"\n=== EO: {eo_file} ===\n")
+                    for key, value in status.items():
+                        if value and key in ["missing_channels", "overlapping_positions"]:
+                            log.write(f"{key}: {value}\n")
+                        elif key not in ["csd_ready", "loreta_ready"]:
+                            log.write(f"{key}: {value}\n")
+        if raw_ec:
+            is_valid, status = validate_montage_for_csd_loreta(raw_ec)
+            print(f"EC Montage Validation: {'✅ Ready' if is_valid else '⚠️ Issues'}")
+            if not is_valid:
+                with open(os.path.join(project_dir, "montage_validation_log.txt"), "a") as log:
+                    log.write(f"\n=== EC: {ec_file} ===\n")
+                    for key, value in status.items():
+                        if value and key in ["missing_channels", "overlapping_positions"]:
+                            log.write(f"{key}: {value}\n")
+                        elif key not in ["csd_ready", "loreta_ready"]:
+                            log.write(f"{key}: {value}\n")
+
     # Apply CSD if requested, with fallback to original data on failure
     if use_csd:
         raw_eo_csd = raw_eo.copy().load_data() if raw_eo else None
@@ -454,14 +484,14 @@ def load_and_preprocess_data(project_dir, files, use_csd):
                 print("CSD applied for graphs (EO).")
             except Exception as e:
                 print("CSD for graphs (EO) failed:", e)
-                raw_eo_csd = raw_eo
+                raw_eo_csd = raw_eo  # Fallback to non-CSD data
         if raw_ec_csd:
             try:
                 raw_ec_csd = mne.preprocessing.compute_current_source_density(raw_ec_csd)
                 print("CSD applied for graphs (EC).")
             except Exception as e:
                 print("CSD for graphs (EC) failed:", e)
-                raw_ec_csd = raw_ec
+                raw_ec_csd = raw_ec  # Fallback to non-CSD data
     else:
         raw_eo_csd = raw_eo
         raw_ec_csd = raw_ec
