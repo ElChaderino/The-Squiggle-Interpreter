@@ -23,6 +23,7 @@ import time
 import subprocess
 import numpy as np
 import matplotlib
+
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 import mne
@@ -52,10 +53,6 @@ except ImportError:
 
 # ---------------- Robust Z-Score Functions ----------------
 def robust_mad(x, constant=1.4826, max_iter=10, tol=1e-3):
-    """
-    Compute a robust MAD (Median Absolute Deviation) with iterative outlier rejection.
-    Returns a scaled MAD (to be comparable to std) and the median.
-    """
     x = np.asarray(x)
     med = np.median(x)
     mad = np.median(np.abs(x - med))
@@ -70,9 +67,6 @@ def robust_mad(x, constant=1.4826, max_iter=10, tol=1e-3):
 
 
 def robust_zscore(x, use_iqr=False):
-    """
-    Compute robust z-scores using the median and either MAD or IQR.
-    """
     x = np.asarray(x)
     med = np.median(x)
     if use_iqr:
@@ -87,9 +81,6 @@ def robust_zscore(x, use_iqr=False):
 
 
 def compute_bandpower_robust_zscores(raw, bands=None, fmin=1, fmax=40, n_fft=2048, use_iqr=False):
-    """
-    Compute robust z-scores of log bandpower for each channel.
-    """
     if bands is None:
         bands = {
             'delta': (1, 4),
@@ -110,11 +101,6 @@ def compute_bandpower_robust_zscores(raw, bands=None, fmin=1, fmax=40, n_fft=204
 
 
 def load_clinical_outcomes(csv_file, n_channels):
-    """
-    Load clinical outcomes from a CSV file.
-    Expects a column named 'outcome'. If the file is not found or errors occur,
-    returns a dummy vector.
-    """
     try:
         df = pd.read_csv(csv_file)
         outcomes = df['outcome'].values
@@ -127,10 +113,6 @@ def load_clinical_outcomes(csv_file, n_channels):
 
 
 def compare_zscores(standard_z, robust_z, clinical_outcomes):
-    """
-    Compare standard z-scores (using mean/std) with robust z-scores via Pearson correlation
-    against clinical outcome data.
-    """
     for band in standard_z.keys():
         r_std, p_std = pearsonr(standard_z[band], clinical_outcomes)
         r_rob, p_rob = pearsonr(robust_z[band], clinical_outcomes)
@@ -141,10 +123,6 @@ def compare_zscores(standard_z, robust_z, clinical_outcomes):
 
 # --- Utility: Group EDF Files by Subject ---
 def find_subject_edf_files(directory):
-    """
-    Find and group EDF files by subject.
-    Assumes filenames are in the format: <subjectID>eo.edf and <subjectID>ec.edf.
-    """
     edf_files = [f for f in os.listdir(directory) if f.lower().endswith('.edf')]
     subjects = {}
     for f in edf_files:
@@ -160,9 +138,6 @@ def find_subject_edf_files(directory):
 
 
 def live_eeg_display(stop_event, update_interval=1.2):
-    """
-    Display a simulated live EEG waveform in the terminal using rich.
-    """
     def generate_eeg_wave(num_points=80):
         x = np.linspace(0, 4 * np.pi, num_points)
         wave = np.sin(x) + np.random.normal(0, 0.3, size=num_points)
@@ -170,6 +145,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
         norm_wave = (wave - wave.min()) / (wave.max() - wave.min() + 1e-10)
         indices = (norm_wave * (len(gradient) - 1)).astype(int)
         return "".join(gradient[i] for i in indices)
+
     def get_random_quote():
         quotes = [
             "The Dude abides.",
@@ -181,7 +157,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "Don’t cross the streams, Walter. I’m seeing delta in my alpha, man.",
             "Calmer than you are? My frontal lobes are lighting up like a bowling alley.",
             "Smokey, this is not 'Nam. This is neurofeedback. There are protocols.",
-            "Obviously you’re not a golfer, or you’d know theta doesn’t spike like that."
+            "Obviously you’re not a golfer, or you’d know theta doesn’t spike like that.",
             "The alpha giveth, and the theta taketh away.",
             "Don’t trust a flatline. Even silence has a frequency.",
             "The coherence is strong in this one.",
@@ -201,7 +177,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "Every band tells a story. This one screams 'undiagnosed ADHD with a splash of genius.'",
             "Careful with the cross-frequency coupling… that's where the dragons sleep.",
             "In a land before time, someone spiked the theta—and the oracle woke up.",
-            "Real-time feedback? Nah, this is EEG jazz, man. Improv with voltage."
+            "Real-time feedback? Nah, this is EEG jazz, man. Improv with voltage.",
             "And now for something completely cortical.",
             "Your alpha waves have been accused of witchcraft!",
             "’Tis but a minor artifact! I’ve had worse!",
@@ -211,7 +187,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "Help! Help! I'm being over-synchronized!",
             "We are the EEG technicians who say... *Ni!*",
             "On second thought, let’s not record at Fz. It is a silly place.",
-            "I once saw a brain entrain so hard, it turned me into a newt. I got better."
+            "I once saw a brain entrain so hard, it turned me into a newt. I got better.",
             "Your brain has exceeded its bandwidth quota. Please upgrade.",
             "Synapse latency detected. Reboot your consciousness.",
             "Alpha rhythm flagged: unauthorized serenity.",
@@ -221,7 +197,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "This is not a biofeedback session. This is surveillance with consent.",
             "Signal integrity compromised. Mind bleed imminent.",
             "You are being watched by 64 channels of your own making.",
-            "Your dreams are now property of NeuroCorp™."
+            "Your dreams are now property of NeuroCorp™.",
             "The cortex folded like origami under a sonic burst of insight.",
             "She rode her SMR wave like a hacker surfing the noosphere.",
             "In the subdural silence, the squiggles spoke prophecy.",
@@ -231,7 +207,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "The brain is not a machine. It's a codebase... evolving.",
             "He trained at Cz until the feedback whispered his name.",
             "Phase-lock acquired. Prepare to uplink to the collective.",
-            "She reached Pz. It shimmered. The veil between thoughts lifted."
+            "She reached Pz. It shimmered. The veil between thoughts lifted.",
             "Theta is the dreamer’s path — the shadow realm whispers.",
             "Each peak a memory. Each trough, a wound not yet integrated.",
             "In the dance of Alpha and Theta lies the gate to the Self.",
@@ -241,7 +217,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "Synchrony is the return to the sacred masculine and feminine balance.",
             "Frontal asymmetry reveals the archetype you suppress.",
             "High beta is the ego screaming to remain relevant.",
-            "To see coherence is to glimpse the collective unconscious rendered in voltage."
+            "To see coherence is to glimpse the collective unconscious rendered in voltage.",
             "The signal is raw ore. Your attention — the hammer.",
             "This isn’t data. It’s a blade waiting for the quench.",
             "Every artifact is a misstrike. Adjust your grip.",
@@ -251,7 +227,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "High beta? That’s a spark flying before the temper holds.",
             "Each protocol is a blacksmith’s chant. Repetition. Focus. Fire.",
             "Theta hums like the bellows before alpha glows true.",
-            "Some build castles in the clouds. I build minds in the flame."
+            "Some build castles in the clouds. I build minds in the flame.",
             "[ALPHA] ~ engaged @ 10.0Hz // you're surfing the calmnet.",
             "*sysop has entered the mind* >> Theta/beta > 3.2 — user flagged for wandering.",
             "<neuroN0de> dude your SMR band just buffer-overflowed reality lol.",
@@ -261,7 +237,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "BRAIN.SYS: Unexpected Delta spike at wake_state=1",
             "Welcome to the z-sc0r3z BBS — leave your ego at the login prompt.",
             "[EEG-OPS]: alpha locked. theta contained. signal pure.",
-            "*vibrotactile entrainment initiated* — press <F2> to feel old gods resonate."
+            "*vibrotactile entrainment initiated* — press <F2> to feel old gods resonate.",
             "Alpha hums like neon rain — cortex in low-noise high-focus mode.",
             "Neural net drift detected. Theta bleeding into Beta. Patch cognition.exe.",
             "Mind uplink stable. Vigilance layer: A1. Spin the waveforms, cowboy.",
@@ -271,7 +247,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "Mental firewall down. Beta intrusion spiking at 28Hz. Secure the band.",
             "She walked in with alpha like moonlight on wet asphalt.",
             "Bio-signal integrity compromised. sLORETA grid glitching at parietal rim.",
-            "Brainwave sync: 𝑔𝑟𝑒𝑒𝑛. Thoughts encrypted. Consciousness... proxied."
+            "Brainwave sync: 𝑔𝑟𝑒𝑒𝑛. Thoughts encrypted. Consciousness... proxied.",
             "Release: [neuroGENx v1.337] :: Cracked by [SMR] Crew :: Respect to #eeg-scene",
             "[ZSC0RE DUMP] ∙ Channel Pz ∙ Vigilance: A2 ∙ State: 🟡 Semi-Coherent",
             "Signal patched, checksum clean. Alpha uptrained. Mind ready for upload.",
@@ -281,12 +257,12 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "+[ Mind scan @ Cz complete ]+ ➜ No malware. Just trauma.",
             "[SYS REPORT] :: Executive functions: overclocked · Memory: defragging",
             "Greetings from the Limbic Underground :: Your amygdala owes us rent.",
-            "This session was proudly cracked by ████ – z-scores normalized, reality bent."
+            "This session was proudly cracked by ████ – z-scores normalized, reality bent.",
             "Let the data speak — but be ready when it starts shouting in high-beta.",
             "You're not treating ADHD — you're treating 15 microvolts of distributed chaos.",
             "Alpha is a state. But stable posterior alpha? That’s a trait. Respect the trait.",
             "Cz’s not anxious, it’s just watching you screw up the montage.",
-            "If you see beta spindles at Fz and think 'focus', call Jay — he’ll recalibrate your soul."
+            "If you see beta spindles at Fz and think 'focus', call Jay — he’ll recalibrate your soul.",
             "PAF tells you who they *are*, not just how they slept.",
             "T4 whispers trauma. Pz remembers the dreams.",
             "Delta at FP1? That’s not a sleep wave — that’s a buried memory with a security clearance.",
@@ -301,7 +277,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "A brain out of phase tells you it’s still negotiating its lease on reality.",
             "Artifact rejection is the brain’s way of testing your ethics.",
             "Every topomap is a Rorschach — the trick is knowing which ink is dry.",
-            "High theta doesn’t always mean ADHD. Sometimes it just means the world is too loud."
+            "High theta doesn’t always mean ADHD. Sometimes it just means the world is too loud.",
             "If you don’t know your client’s PAF, you’re driving with a map but no compass.",
             "Training attention without tracking arousal is like aiming without noticing you’re underwater.",
             "If the brain doesn’t change in 20 sessions, maybe it doesn’t want to. Or maybe it doesn’t trust you yet.",
@@ -324,6 +300,7 @@ def live_eeg_display(stop_event, update_interval=1.2):
             "Every brain is a poem. Try not to edit it too fast."
         ]
         return np.random.choice(quotes)
+
     console = Console()
     with Live(refresh_per_second=10, console=console) as live:
         while not stop_event.is_set():
@@ -347,10 +324,6 @@ def sigint_handler(signum, frame):
 # --- Refactored Pipeline Functions ---
 
 def parse_arguments():
-    """
-    Parse command-line arguments and prompt for missing ones.
-    Returns a configuration dictionary.
-    """
     parser = argparse.ArgumentParser(
         prog='The Squiggle Interpreter',
         description='Comprehensive EEG Analysis & Clinical Report Generation'
@@ -370,7 +343,8 @@ def parse_arguments():
 
     config = {}
     config['csv'] = args.csv
-    if args.csv:
+
+    if config['csv']:
         if not args.edf or not args.output_csv:
             print("For CSV export, please provide both --edf and --output_csv arguments.")
             sys.exit(1)
@@ -398,11 +372,8 @@ def parse_arguments():
     return config
 
 
+
 def setup_output_directories(project_dir, subject):
-    """
-    Set up output directories for a subject.
-    Returns the overall output directory and a dictionary of subfolders.
-    """
     overall_output_dir = os.path.join(project_dir, "outputs")
     os.makedirs(overall_output_dir, exist_ok=True)
 
@@ -432,10 +403,6 @@ def setup_output_directories(project_dir, subject):
 
 
 def load_zscore_stats(method_choice):
-    """
-    Load z-score normalization stats based on the chosen method.
-    Returns the stats dictionary.
-    """
     if method_choice == "4":
         published_norm_stats = {
             "Alpha": {"median": 20.0, "mad": 4.0},
@@ -459,32 +426,42 @@ def load_zscore_stats(method_choice):
 
 
 def load_and_preprocess_data(project_dir, files, use_csd):
-    """
-    Load and preprocess EEG data for EO and EC conditions.
-    Returns raw and CSD-processed data for both conditions.
-    """
     eo_file = files["EO"] if files["EO"] else files["EC"]
     ec_file = files["EC"] if files["EC"] else files["EO"]
     print(f"EO file: {eo_file}, EC file: {ec_file}")
 
-    raw_eo = io_utils.load_eeg_data(os.path.join(project_dir, eo_file), use_csd=False)
-    raw_ec = io_utils.load_eeg_data(os.path.join(project_dir, ec_file), use_csd=False)
+    # Handle case where no files are available
+    if not eo_file and not ec_file:
+        print("No EO or EC files available for processing.")
+        return None, None, None, None
 
+    # Load data with fallback to None if loading fails
+    raw_eo = io_utils.load_eeg_data(os.path.join(project_dir, eo_file), use_csd=False) if eo_file else None
+    raw_ec = io_utils.load_eeg_data(os.path.join(project_dir, ec_file), use_csd=False) if ec_file else None
+
+    # If both are None, return early
+    if raw_eo is None and raw_ec is None:
+        print("Failed to load both EO and EC data.")
+        return None, None, None, None
+
+    # Apply CSD if requested, with fallback to original data on failure
     if use_csd:
-        raw_eo_csd = raw_eo.copy().load_data()
-        raw_ec_csd = raw_ec.copy().load_data()
-        try:
-            raw_eo_csd = mne.preprocessing.compute_current_source_density(raw_eo_csd)
-            print("CSD applied for graphs (EO).")
-        except Exception as e:
-            print("CSD for graphs (EO) failed:", e)
-            raw_eo_csd = raw_eo
-        try:
-            raw_ec_csd = mne.preprocessing.compute_current_source_density(raw_ec_csd)
-            print("CSD applied for graphs (EC).")
-        except Exception as e:
-            print("CSD for graphs (EC) failed:", e)
-            raw_ec_csd = raw_ec
+        raw_eo_csd = raw_eo.copy().load_data() if raw_eo else None
+        raw_ec_csd = raw_ec.copy().load_data() if raw_ec else None
+        if raw_eo_csd:
+            try:
+                raw_eo_csd = mne.preprocessing.compute_current_source_density(raw_eo_csd)
+                print("CSD applied for graphs (EO).")
+            except Exception as e:
+                print("CSD for graphs (EO) failed:", e)
+                raw_eo_csd = raw_eo
+        if raw_ec_csd:
+            try:
+                raw_ec_csd = mne.preprocessing.compute_current_source_density(raw_ec_csd)
+                print("CSD applied for graphs (EC).")
+            except Exception as e:
+                print("CSD for graphs (EC) failed:", e)
+                raw_ec_csd = raw_ec
     else:
         raw_eo_csd = raw_eo
         raw_ec_csd = raw_ec
@@ -493,10 +470,6 @@ def load_and_preprocess_data(project_dir, files, use_csd):
 
 
 def compute_zscore_features(raw_eo, method_choice, published_norm_stats):
-    """
-    Compute z-score features based on the chosen method.
-    Returns standard and chosen z-score features.
-    """
     default_bands = {
         'delta': (1, 4),
         'theta': (4, 8),
@@ -504,6 +477,10 @@ def compute_zscore_features(raw_eo, method_choice, published_norm_stats):
         'beta': (12, 30),
         'gamma': (30, 40)
     }
+
+    if raw_eo is None:
+        print("Cannot compute z-score features: EO data is None.")
+        return {}, {}
 
     psds, freqs = psd_welch(raw_eo.get_data(), raw_eo.info['sfreq'], fmin=1, fmax=40, n_fft=2048, verbose=False)
     psds_db = 10 * np.log10(psds)
@@ -536,9 +513,9 @@ def compute_zscore_features(raw_eo, method_choice, published_norm_stats):
 
 
 def process_vigilance(raw_eo, folders):
-    """
-    Process vigilance states and save hypnogram.
-    """
+    if raw_eo is None:
+        print("Skipping vigilance processing: EO data is None.")
+        return
     vigilance_states = vigilance.compute_vigilance_states(raw_eo, epoch_length=2.0)
     try:
         fig = plot_vigilance_hypnogram(vigilance_states, epoch_length=2.0)
@@ -553,10 +530,9 @@ def process_vigilance(raw_eo, folders):
 
 
 def process_topomaps(raw, condition, folders, band_list):
-    """
-    Process topomaps for the given condition (e.g., "EO" or "EC").
-    Returns a dictionary of topomap file names.
-    """
+    if raw is None:
+        print(f"Skipping topomap processing for {condition}: No data available.")
+        return {}
     bp = processing.compute_all_band_powers(raw)
     topomaps = {}
     for band in band_list:
@@ -575,10 +551,9 @@ def process_topomaps(raw, condition, folders, band_list):
 
 
 def process_waveforms(raw, condition, folders, band_list):
-    """
-    Process waveform grids for the given condition.
-    Returns a dictionary of waveform file paths.
-    """
+    if raw is None:
+        print(f"Skipping waveform processing for {condition}: No data available.")
+        return {}
     global_waveforms = {}
     data = raw.get_data() * 1e6
     sfreq = raw.info['sfreq']
@@ -593,10 +568,9 @@ def process_waveforms(raw, condition, folders, band_list):
 
 
 def process_erp(raw, condition, folders):
-    """
-    Process ERP for the given condition.
-    Returns the ERP file path.
-    """
+    if raw is None:
+        print(f"Skipping ERP processing for {condition}: No data available.")
+        return ""
     erp_fig = processing.compute_pseudo_erp(raw)
     erp_path = os.path.join(folders["erp"], f"erp_{condition}.png")
     erp_fig.savefig(erp_path, facecolor='black')
@@ -606,10 +580,9 @@ def process_erp(raw, condition, folders):
 
 
 def process_coherence(raw, condition, folders, band_list):
-    """
-    Process coherence matrices for the given condition.
-    Returns a dictionary of coherence file paths.
-    """
+    if raw is None:
+        print(f"Skipping coherence processing for {condition}: No data available.")
+        return {}
     coherence_maps = {}
     sfreq = raw.info['sfreq']
     for band in band_list:
@@ -626,10 +599,9 @@ def process_coherence(raw, condition, folders, band_list):
 
 
 def process_zscores(raw, condition, folders, band_list, norm_stats):
-    """
-    Process robust z-score topomaps for the given condition.
-    Returns a dictionary of z-score file paths.
-    """
+    if raw is None:
+        print(f"Skipping z-score processing for {condition}: No data available.")
+        return {}
     zscore_maps = processing.compute_all_zscore_maps(raw, norm_stats, epoch_len_sec=2.0)
     zscore_images = {}
     for band in band_list:
@@ -644,10 +616,9 @@ def process_zscores(raw, condition, folders, band_list, norm_stats):
 
 
 def process_tfr(raw, condition, folders, band_list):
-    """
-    Process TFR maps for the given condition.
-    Returns a dictionary of TFR file paths.
-    """
+    if raw is None:
+        print(f"Skipping TFR processing for {condition}: No data available.")
+        return {}
     n_cycles = 2.0
     tfr_maps = processing.compute_all_tfr_maps(raw, n_cycles, tmin=0.0, tmax=4.0)
     tfr_images = {}
@@ -665,10 +636,9 @@ def process_tfr(raw, condition, folders, band_list):
 
 
 def process_ica(raw, condition, folders):
-    """
-    Process ICA for the given condition.
-    Returns the ICA file path.
-    """
+    if raw is None:
+        print(f"Skipping ICA processing for {condition}: No data available.")
+        return ""
     ica = processing.compute_ica(raw)
     fig_ica = plotting.plot_ica_components(ica, raw)
     ica_path = os.path.join(folders[f"ica_{condition.lower()}"], f"ica_{condition}.png")
@@ -679,18 +649,18 @@ def process_ica(raw, condition, folders):
 
 
 def process_source_localization(raw_eo, raw_ec, folders, band_list):
-    """
-    Process source localization for EO and EC.
-    Returns a dictionary of source localization file paths.
+    if raw_eo is None and raw_ec is None:
+        print("Skipping source localization: No EO or EC data available.")
+        return {"EO": {}, "EC": {}}
 
-    Note: This function expects data with a standard "average" reference.
-    For source localization, we now use the original raw data (not CSD-transformed).
-    """
-    raw_source_eo = raw_eo.copy()
-    raw_source_ec = raw_ec.copy()
-    raw_source_eo.set_eeg_reference("average", projection=False)
-    raw_source_ec.set_eeg_reference("average", projection=False)
-    print("EEG channels for source localization (EO):", mne.pick_types(raw_source_eo.info, meg=False, eeg=True))
+    raw_source_eo = raw_eo.copy() if raw_eo else None
+    raw_source_ec = raw_ec.copy() if raw_ec else None
+
+    if raw_source_eo:
+        raw_source_eo.set_eeg_reference("average", projection=False)
+        print("EEG channels for source localization (EO):", mne.pick_types(raw_source_eo.info, meg=False, eeg=True))
+    if raw_source_ec:
+        raw_source_ec.set_eeg_reference("average", projection=False)
 
     fs_dir = mne.datasets.fetch_fsaverage(verbose=True)
     subjects_dir = os.path.dirname(fs_dir)
@@ -701,21 +671,27 @@ def process_source_localization(raw_eo, raw_ec, folders, band_list):
     bem_solution = mne.make_bem_solution(bem_model)
 
     fwd_eo = mne.make_forward_solution(raw_source_eo.info, trans="fsaverage", src=src,
-                                       bem=bem_solution, eeg=True, meg=False, verbose=False)
+                                       bem=bem_solution, eeg=True, meg=False, verbose=False) if raw_source_eo else None
     fwd_ec = mne.make_forward_solution(raw_source_ec.info, trans="fsaverage", src=src,
-                                       bem=bem_solution, eeg=True, meg=False, verbose=False)
+                                       bem=bem_solution, eeg=True, meg=False, verbose=False) if raw_source_ec else None
 
-    events_eo = mne.make_fixed_length_events(raw_eo, duration=2.0)
-    epochs_eo = mne.Epochs(raw_eo, events_eo, tmin=-0.1, tmax=0.4, baseline=(None, 0),
-                           preload=True, verbose=False)
-    cov_eo = mne.compute_covariance(epochs_eo, tmax=0., method="empirical", verbose=False)
+    if raw_eo:
+        events_eo = mne.make_fixed_length_events(raw_eo, duration=2.0)
+        epochs_eo = mne.Epochs(raw_eo, events_eo, tmin=-0.1, tmax=0.4, baseline=(None, 0),
+                               preload=True, verbose=False)
+        cov_eo = mne.compute_covariance(epochs_eo, tmax=0., method="empirical", verbose=False)
+    else:
+        cov_eo = None
 
-    inv_op_eo = processing.compute_inverse_operator(raw_source_eo, fwd_eo, cov_eo)
-    inv_op_ec = processing.compute_inverse_operator(raw_source_ec, fwd_ec, cov_eo)
+    inv_op_eo = processing.compute_inverse_operator(raw_source_eo, fwd_eo, cov_eo) if raw_source_eo and cov_eo else None
+    inv_op_ec = processing.compute_inverse_operator(raw_source_ec, fwd_ec, cov_eo) if raw_source_ec and cov_eo else None
 
     source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eLORETA"}
     source_localization = {"EO": {}, "EC": {}}
     for cond, raw_data, inv_op in [("EO", raw_eo, inv_op_eo), ("EC", raw_ec, inv_op_ec)]:
+        if raw_data is None or inv_op is None:
+            print(f"Skipping source localization for {cond}: No data or inverse operator available.")
+            continue
         for band in band_list:
             band_range = processing.BANDS[band]
             raw_band = raw_data.copy().filter(band_range[0], band_range[1], verbose=False)
@@ -727,23 +703,26 @@ def process_source_localization(raw_eo, raw_ec, folders, band_list):
             os.makedirs(cond_folder, exist_ok=True)
             for method, method_label in source_methods.items():
                 try:
-                    stc = processing.compute_source_localization(evoked, inv_op, lambda2=1.0/9.0, method=method_label)
-                    fig_src = plotting.plot_source_estimate(stc, view="lateral", time_point=0.1, subjects_dir=subjects_dir)
+                    stc = processing.compute_source_localization(evoked, inv_op, lambda2=1.0 / 9.0, method=method_label)
+                    fig_src = plotting.plot_source_estimate(stc, view="lateral", time_point=0.1,
+                                                            subjects_dir=subjects_dir)
                     src_filename = f"source_{cond}_{method}_{band}.png"
                     src_path = os.path.join(cond_folder, src_filename)
                     fig_src.savefig(src_path, dpi=150, bbox_inches="tight", facecolor="black")
                     plt.close(fig_src)
                     source_localization[cond].setdefault(band, {})[method] = cond + "/" + src_filename
-                    print(f"Saved {method} source localization for {cond} {band} to {src_path}")
+                    fig_src.savefig(src_path, dpi=150, bbox_inches="tight", facecolor="black")
+                    # No need to print anything unless debugging
+
                 except Exception as e:
                     print(f"Error computing source localization for {cond} {band} with {method}: {e}")
     return source_localization
 
 
 def process_phenotype(raw_eo, subject_folder, subject):
-    """
-    Process phenotype classification and append results to the clinical report.
-    """
+    if raw_eo is None:
+        print("Skipping phenotype processing: EO data is None.")
+        return
     from modules.feature_extraction import extract_classification_features
     features = extract_classification_features(raw_eo, [])
     phenotype_results = classify_eeg_profile(features)
@@ -765,61 +744,62 @@ def process_phenotype(raw_eo, subject_folder, subject):
 
 def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list, config, topomaps, waveforms, erp,
                      coherence, zscores, tfr, ica, source_localization):
-    bp_eo = processing.compute_all_band_powers(raw_eo)
-    bp_ec = processing.compute_all_band_powers(raw_ec)
-    print(f"Subject {subject} - Computed band powers for EO channels:", list(bp_eo.keys()))
-    print(f"Subject {subject} - Computed band powers for EC channels:", list(bp_ec.keys()))
+    if raw_eo is None and raw_ec is None:
+        print(f"Skipping report generation for subject {subject}: No EO or EC data available.")
+        return
 
-    clinical.generate_site_reports(bp_eo, bp_ec, subject_folder)
+    bp_eo = processing.compute_all_band_powers(raw_eo) if raw_eo else {}
+    bp_ec = processing.compute_all_band_powers(raw_ec) if raw_ec else {}
+    print(f"Subject {subject} - Computed band powers for EO channels:", list(bp_eo.keys()) if bp_eo else "None")
+    print(f"Subject {subject} - Computed band powers for EC channels:", list(bp_ec.keys()) if bp_ec else "None")
 
-    if config['report']:
-        # Updated call: pass use_csd and apply_filter parameters
+    if bp_eo or bp_ec:
+        clinical.generate_site_reports(bp_eo, bp_ec, subject_folder)
+
+    if config['report'] and (raw_eo or raw_ec):
         clinical_report.generate_full_clinical_report(config['csd'], True, subject_folder, subject)
 
-    clinical.generate_full_site_reports(raw_eo, raw_ec, folders["detailed"])
+    if raw_eo or raw_ec:
+        clinical.generate_full_site_reports(raw_eo, raw_ec, folders["detailed"])
 
-    # --- Generate Global Difference Images ---
-    # Compute global difference (EO - EC) for each band across all channels.
     global_diff_images = {}
-    for b in band_list:
-        diff_vals = [bp_eo[ch][b] - bp_ec[ch][b] for ch in raw_eo.ch_names]
-        # Generate difference topomap and difference bar graph using new plotting functions:
-        diff_topo_fig = plotting.plot_difference_topomap(diff_vals, raw_eo.info, b)
-        diff_bar_fig  = plotting.plot_difference_bar(diff_vals, raw_eo.ch_names, b)
-        # Save these images into a common folder (here, we use the "detailed" folder)
-        diff_topo_path = os.path.join(folders["detailed"], f"DifferenceTopomap_{b}.png")
-        diff_bar_path  = os.path.join(folders["detailed"], f"DifferenceBar_{b}.png")
-        diff_topo_fig.savefig(diff_topo_path, facecolor='black')
-        diff_bar_fig.savefig(diff_bar_path, facecolor='black')
-        plt.close(diff_topo_fig)
-        plt.close(diff_bar_fig)
-        global_diff_images[b] = {
-            "diff_topo": os.path.basename(diff_topo_path),
-            "diff_bar": os.path.basename(diff_bar_path)
-        }
-        print(f"Generated global difference images for {b}:")
-        print(f"  Topomap: {diff_topo_path}")
-        print(f"  Bar graph: {diff_bar_path}")
+    if raw_eo and raw_ec:
+        for b in band_list:
+            diff_vals = [bp_eo[ch][b] - bp_ec[ch][b] for ch in raw_eo.ch_names]
+            diff_topo_fig = plotting.plot_difference_topomap(diff_vals, raw_eo.info, b)
+            diff_bar_fig = plotting.plot_difference_bar(diff_vals, raw_eo.ch_names, b)
+            diff_topo_path = os.path.join(folders["detailed"], f"DifferenceTopomap_{b}.png")
+            diff_bar_path = os.path.join(folders["detailed"], f"DifferenceBar_{b}.png")
+            diff_topo_fig.savefig(diff_topo_path, facecolor='black')
+            diff_bar_fig.savefig(diff_bar_path, facecolor='black')
+            plt.close(diff_topo_fig)
+            plt.close(diff_bar_fig)
+            global_diff_images[b] = {
+                "diff_topo": os.path.basename(diff_topo_path),
+                "diff_bar": os.path.basename(diff_bar_path)
+            }
+            print(f"Generated global difference images for {b}:")
+            print(f"  Topomap: {diff_topo_path}")
+            print(f"  Bar graph: {diff_bar_path}")
 
-    # --- Build site dictionary for report including difference maps (global difference images are used for every site) ---
-    site_list = raw_eo.ch_names
+    site_list = raw_eo.ch_names if raw_eo else (raw_ec.ch_names if raw_ec else [])
     site_dict = {}
     for site in site_list:
         site_dict[site] = {}
-        # Folder structure: <subject_folder>/detailed_site_plots/<site>/ with subfolders for PSD and waveform overlays.
         site_folder = os.path.join(folders["detailed"], site)
         psd_folder = os.path.join(site_folder, "PSD_Overlay")
         wave_folder = os.path.join(site_folder, "Waveform_Overlay")
         for b in band_list:
             psd_filename = f"{site}_PSD_{b}.png"
             wave_filename = f"{site}_Waveform_{b}.png"
-            # Use global difference image names for both difference topomap and bar graph.
-            diff_topo_filename = global_diff_images[b]["diff_topo"]
-            diff_bar_filename  = global_diff_images[b]["diff_bar"]
+            diff_topo_filename = global_diff_images.get(b, {}).get("diff_topo", "")
+            diff_bar_filename = global_diff_images.get(b, {}).get("diff_bar", "")
             psd_path_rel = os.path.relpath(os.path.join(psd_folder, psd_filename), subject_folder)
             wave_path_rel = os.path.relpath(os.path.join(wave_folder, wave_filename), subject_folder)
-            diff_topo_path_rel = os.path.relpath(os.path.join(folders["detailed"], diff_topo_filename), subject_folder)
-            diff_bar_path_rel = os.path.relpath(os.path.join(folders["detailed"], diff_bar_filename), subject_folder)
+            diff_topo_path_rel = os.path.relpath(os.path.join(folders["detailed"], diff_topo_filename),
+                                                 subject_folder) if diff_topo_filename else ""
+            diff_bar_path_rel = os.path.relpath(os.path.join(folders["detailed"], diff_bar_filename),
+                                                subject_folder) if diff_bar_filename else ""
             site_dict[site][b] = {
                 "psd": psd_path_rel,
                 "wave": wave_path_rel,
@@ -838,8 +818,8 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
             "EC": coherence["EC"]
         },
         "global_erp": {
-            "EO": os.path.basename(erp["EO"]),
-            "EC": os.path.basename(erp["EC"])
+            "EO": os.path.basename(erp["EO"]) if erp["EO"] else "",
+            "EC": os.path.basename(erp["EC"]) if erp["EC"] else ""
         },
         "zscore": {
             "EO": zscores["EO"],
@@ -850,7 +830,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
             "EC": tfr["EC"]
         },
         "ica": {
-            "EO": os.path.basename(ica["EO"]),
+            "EO": os.path.basename(ica["EO"]) if ica["EO"] else "",
             "EC": ""
         },
         "source_localization": source_localization,
@@ -891,11 +871,17 @@ def process_subject(subject, files, project_dir, config):
     raw_eo, raw_ec, raw_eo_csd, raw_ec_csd = load_and_preprocess_data(project_dir, files, config['csd'])
     print(f"Loaded data for subject {subject}")
 
+    if raw_eo is None and raw_ec is None:
+        print(f"Skipping processing for subject {subject}: No valid EEG data loaded.")
+        stop_event.set()
+        live_thread.join()
+        return
+
     norm_stats = load_zscore_stats(config['zscore'])
 
     standard_features, chosen_features = compute_zscore_features(raw_eo, config['zscore'], norm_stats)
     clinical_csv = os.path.join(project_dir, "clinical_outcomes.csv")
-    clinical_outcomes = load_clinical_outcomes(clinical_csv, raw_eo.info['nchan'])
+    clinical_outcomes = load_clinical_outcomes(clinical_csv, raw_eo.info['nchan'] if raw_eo else raw_ec.info['nchan'])
     print("Comparing standard vs. chosen z-score method:")
     compare_zscores(standard_features, chosen_features, clinical_outcomes)
 
@@ -903,44 +889,54 @@ def process_subject(subject, files, project_dir, config):
 
     band_list = list(processing.BANDS.keys())
 
-    topomaps = {
-        "EO": process_topomaps(raw_eo_csd, "EO", folders, band_list),
-        "EC": process_topomaps(raw_ec_csd, "EC", folders, band_list)
-    }
+    topomaps = {"EO": {}, "EC": {}}
+    for cond, raw_data in [("EO", raw_eo_csd), ("EC", raw_ec_csd)]:
+        if raw_data:
+            dig = raw_data.info.get("dig", None)
+            has_dig = dig is not None and any(
+                d['kind'] in (FIFF.FIFFV_POINT_EEG, FIFF.FIFFV_POINT_EXTRA) for d in dig
+            )
+            if not has_dig:
+                print(f"[!] Skipping topomap processing for {cond} — no digitization data found.")
+                with open("missing_channels_log.txt", "a") as log:
+                    log.write(f"\n=== Skipped Topomaps for {cond} ===\n")
+                    log.write("No digitization data present.\n")
+                continue
+            topomaps[cond] = process_topomaps(raw_data, cond, folders, band_list)
 
     waveforms = {
-        "EO": process_waveforms(raw_eo_csd, "EO", folders, band_list)
+        "EO": process_waveforms(raw_eo_csd, "EO", folders, band_list) if raw_eo_csd else {}
     }
 
     erp = {
-        "EO": process_erp(raw_eo_csd, "EO", folders),
-        "EC": process_erp(raw_ec_csd, "EC", folders)
+        "EO": process_erp(raw_eo_csd, "EO", folders) if raw_eo_csd else "",
+        "EC": process_erp(raw_ec_csd, "EC", folders) if raw_ec_csd else ""
     }
 
     coherence = {
-        "EO": process_coherence(raw_eo_csd, "EO", folders, band_list),
-        "EC": process_coherence(raw_ec_csd, "EC", folders, band_list)
+        "EO": process_coherence(raw_eo_csd, "EO", folders, band_list) if raw_eo_csd else {},
+        "EC": process_coherence(raw_ec_csd, "EC", folders, band_list) if raw_ec_csd else {}
     }
 
     zscores = {
-        "EO": process_zscores(raw_eo, "EO", folders, band_list, norm_stats),
-        "EC": process_zscores(raw_ec, "EC", folders, band_list, norm_stats)
+        "EO": process_zscores(raw_eo, "EO", folders, band_list, norm_stats) if raw_eo else {},
+        "EC": process_zscores(raw_ec, "EC", folders, band_list, norm_stats) if raw_ec else {}
     }
 
     tfr = {
-        "EO": process_tfr(raw_eo_csd, "EO", folders, band_list),
-        "EC": process_tfr(raw_ec_csd, "EC", folders, band_list)
+        "EO": process_tfr(raw_eo_csd, "EO", folders, band_list) if raw_eo_csd else {},
+        "EC": process_tfr(raw_ec_csd, "EC", folders, band_list) if raw_ec_csd else {}
     }
 
     ica = {
-        "EO": process_ica(raw_eo_csd, "EO", folders)
+        "EO": process_ica(raw_eo_csd, "EO", folders) if raw_eo_csd else ""
     }
 
-    # For source localization, use the original raw data to avoid re-referencing errors.
     source_localization = process_source_localization(raw_eo, raw_ec, folders, band_list)
     print("Source Localization dictionary:", source_localization)
 
-    process_phenotype(raw_eo, subject_folder, subject)
+    if raw_eo:
+        process_phenotype(raw_eo, subject_folder, subject)
 
     generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list, config, topomaps, waveforms, erp,
                      coherence, zscores, tfr, ica, source_localization)
