@@ -2,105 +2,147 @@ import os
 import re
 import mne
 from mne.io.constants import FIFF
+from pathlib import Path
+import numpy as np
 
-def find_subject_edf_files(directory):
-    # Find all EDF files in the directory and group them by subject based on naming conventions.
-    edf_files = [f for f in os.listdir(directory) if f.lower().endswith('.edf')]
-    subjects = {}
-    pattern = re.compile(r'([a-zA-Z0-9]+)(eo|ec)', re.IGNORECASE)
-    for f in edf_files:
-        match = pattern.search(f)
-        if match:
-            subject_id = match.group(1).lower()
-            condition = match.group(2).upper()
-            if subject_id not in subjects:
-                subjects[subject_id] = {"EO": None, "EC": None}
-            subjects[subject_id][condition] = f
-        else:
-            print(f"File {f} did not match expected naming convention.")
-    return subjects
+CRITICAL_SITES = {"F3", "F4", "CZ", "PZ", "O1", "O2", "T3", "T4", "FZ"}
 
-def load_eeg_data(edf_file, use_csd=False, for_source=False, apply_filter=True):
-    """
-    Load an EDF file, remove "-LE" from channel names, fix channel unit issues,
-    force all channels to EEG, apply the standard 10–20 montage, optionally apply a high-pass filter,
-    and re-reference the data.
-    
-    If for_source is True, it will permanently re-reference the data (projection=False)
-    without adding any reference projection (needed for source localization).
-    If for_source is False, it uses the default behavior (adds a reference projection) for other analyses.
-    
-    Parameters:
-        edf_file (str): Path to the EDF file.
-        use_csd (bool): If True, attempt to compute current source density (CSD) for graphing.
-        for_source (bool): If True, do not add the reference projection (for source localization).
-        apply_filter (bool): If True, apply a high-pass filter (default: True).
-        
-    Returns:
-        mne.io.Raw: The loaded and preprocessed Raw object.
-    """
-    raw = mne.io.read_raw_edf(edf_file, preload=True, verbose=False)
-    
-    # Remove unwanted suffixes (e.g., "-LE")
-    raw.rename_channels({ch: ch.replace("-LE", "") for ch in raw.ch_names})
-    
-    # Fix channel unit issues: change FIFF_UNIT_V_M2 (117) to FIFF_UNIT_V.
-    for ch in raw.info["chs"]:
-        if ch["unit"] == FIFF.FIFF_UNIT_V_M2:
-            ch["unit"] = FIFF.FIFF_UNIT_V
-            ch["unit_mul"] = 0
+def clean_channel_name_dynamic(ch: str) -> str:
+    ch = ch.upper()
+    ch = re.sub(r"^EEG\s*", "", ch)
+    ch = re.sub(r"[-._]?(LE|RE|AVG|M1|M2|A1|A2|REF|AV|CZREF|LINKED|AVERAGE)$", "", ch)
+    return ch.strip()
 
-    # Force all channels to be of type 'eeg'
-    raw.set_channel_types({ch: 'eeg' for ch in raw.ch_names})
-    
-    # Create the standard 10-20 montage.
-    montage = mne.channels.make_standard_montage("standard_1020")
-    
-    # Try setting the montage.
-    try:
-        raw.set_montage(montage, match_case=False)
-    except ValueError as e:
-        print("Montage error:", e)
-        # Identify channels not present in the montage.
-        missing = [ch for ch in raw.ch_names if ch not in montage.ch_names]
-        # Attempt to rename channels by removing a common prefix ("EEG ").
-        new_names = {ch: ch.replace("EEG ", "") for ch in missing if ch.startswith("EEG ")}
-        if new_names:
-            print("Renaming channels to match montage:", new_names)
-            raw.rename_channels(new_names)
-        # Re-check which channels are still missing.
-        missing = [ch for ch in raw.ch_names if ch not in montage.ch_names]
-        if missing:
-            print("Channels not found in montage after renaming, dropping them:", missing)
-            raw.drop_channels(missing)
-        # Now re-apply the montage.
-        raw.set_montage(montage, match_case=False)
-
-    # Set the EEG reference.
-    if for_source:
-        raw.set_eeg_reference("average", projection=False)
-    else:
-        raw.set_eeg_reference("average", projection=True)
-        raw.apply_proj()
-    
-    # Optionally apply a high-pass filter if requested.
-    if apply_filter:
-        raw.filter(l_freq=1.0, h_freq=None, verbose=False)
-        print(f"Applied high-pass filter (1 Hz) to {edf_file}")
-    
-    # Optionally compute current source density (CSD) for graphing.
-    if use_csd:
+def try_alternative_montages(raw):
+    montages = ["biosemi64", "biosemi128", "GSN-HydroCel-129", "standard_alphabetic"]
+    for m_name in montages:
         try:
-            raw = mne.preprocessing.compute_current_source_density(raw)
-            print("CSD transform applied successfully.")
-        except Exception as e:
-            print("CSD computation failed:", e)
-            print("Falling back to standard preprocessing.")
-        raw.set_montage(montage, match_case=False)
-        for ch in raw.info["chs"]:
-            if ch["unit"] == FIFF.FIFF_UNIT_V_M2:
-                ch["unit"] = FIFF.FIFF_UNIT_V
-                ch["unit_mul"] = 0
-        print("Restored channel info after CSD transform.")
-    
+            m = mne.channels.make_standard_montage(m_name)
+            raw.set_montage(m, match_case=False, on_missing="ignore")
+            print(f"✅ Fallback montage applied: {m_name}")
+            return m
+        except Exception:
+            continue
+    return None
+
+def inject_metadata_positions(raw):
+    annotations = getattr(raw, "annotations", None)
+    if annotations:
+        for desc in annotations.description:
+            match = re.match(r"ch_pos:\s*([A-Z0-9]+),\s*([-.\d]+),\s*([-.\d]+),\s*([-.\d]+)", desc)
+            if match:
+                ch, x, y, z = match.groups()
+                ch = ch.strip().upper()
+                idx = raw.ch_names.index(ch) if ch in raw.ch_names else -1
+                if idx >= 0:
+                    raw.info["chs"][idx]["loc"][:3] = [float(x), float(y), float(z)]
+                    print(f"📍 Injected loc from metadata: {ch} -> ({x}, {y}, {z})")
+
+def remove_invalid_channels(raw, tol=0.001):
+    """Remove channels with zero, infinite, or overlapping positions."""
+    ch_names = raw.ch_names
+    pos = np.array([ch["loc"][:3] for ch in raw.info["chs"]])
+    valid_idx = []
+    seen_pos = set()
+
+    for i, (p, name) in enumerate(zip(pos, ch_names)):
+        # Check for zero, infinite, or NaN positions
+        if not np.all(np.isfinite(p)) or np.all(p == 0):
+            print(f"⚠️ Dropping {name}: Invalid position {p}")
+            continue
+        # Check for overlapping positions
+        pos_tuple = tuple(p.round(3))  # Round to avoid floating-point noise
+        if pos_tuple in seen_pos:
+            print(f"⚠️ Dropping {name}: Overlaps with another channel at {p}")
+            continue
+        seen_pos.add(pos_tuple)
+        valid_idx.append(i)
+
+    if not valid_idx:
+        raise ValueError("No channels with valid, unique positions remain.")
+    if len(valid_idx) < len(ch_names):
+        raw.pick(valid_idx)
+        print(f"✅ Kept {len(valid_idx)}/{len(ch_names)} channels after removing invalid/overlapping positions.")
     return raw
+
+def load_eeg_data(edf_path: str | Path, use_csd: bool = False, apply_filter: bool = True, strict_montage: bool = False) -> mne.io.Raw:
+    edf_path = Path(edf_path)
+    try:
+        raw = mne.io.read_raw_edf(str(edf_path), preload=True, verbose=False)
+
+        # Normalize channel names
+        raw.rename_channels({ch: clean_channel_name_dynamic(ch) for ch in raw.ch_names})
+
+        # Standard montage
+        montage = mne.channels.make_standard_montage("standard_1020")
+        raw.set_montage(montage, match_case=False, on_missing="ignore")
+
+        # Inject fallback montage if locs missing
+        montage_pos = montage.get_positions().get("ch_pos", {})
+        missing_locs = []
+        for ch in raw.info["chs"]:
+            name = ch["ch_name"].upper()
+            if name in montage_pos:
+                ch["loc"][:3] = montage_pos[name]
+            else:
+                missing_locs.append(name)
+
+        if missing_locs:
+            fallback = try_alternative_montages(raw)
+            if fallback:
+                montage_pos = fallback.get_positions().get("ch_pos", {})
+                for ch in raw.info["chs"]:
+                    name = ch["ch_name"].upper()
+                    if name in montage_pos:
+                        ch["loc"][:3] = montage_pos[name]
+
+        inject_metadata_positions(raw)
+
+        # Remove channels with invalid or overlapping positions
+        raw = remove_invalid_channels(raw)
+
+        # Log missing locs after filtering
+        missing_after = [ch["ch_name"] for ch in raw.info["chs"] if not ch["loc"][:3].any()]
+        if missing_after:
+            with open("missing_positions_log.txt", "a") as log:
+                log.write(f"\n=== {edf_path.name} ===\n")
+                log.write("Missing 3D electrode positions after filtering:\n")
+                for ch in missing_after:
+                    log.write(f"  - {ch}\n")
+
+        # Abort if critical electrodes are missing and strict mode is on
+        missing_critical = CRITICAL_SITES - set(raw.ch_names)
+        if missing_critical:
+            print(f"[!] Missing critical clinical electrodes: {missing_critical}")
+            if strict_montage:
+                raise RuntimeError(f"Missing critical electrodes: {missing_critical}")
+
+        raw.set_eeg_reference("average", projection=True)
+
+        if apply_filter:
+            raw.filter(l_freq=1.0, h_freq=None, verbose=False)
+            print(f"🔍 Applied 1 Hz high-pass filter to {edf_path.name}")
+
+        if use_csd:
+            dig = raw.info.get("dig", [])
+            has_dig = any(d['kind'] in (FIFF.FIFFV_POINT_EEG, FIFF.FIFFV_POINT_EXTRA) for d in dig)
+            if has_dig and not any(np.all(ch["loc"][:3] == 0) or not np.all(np.isfinite(ch["loc"][:3])) for ch in raw.info["chs"]):
+                try:
+                    raw = mne.preprocessing.compute_current_source_density(raw)
+                    print(f"🧠 CSD applied to {edf_path.name}")
+                except Exception as csd_error:
+                    print(f"[!] CSD failed on {edf_path.name}: {csd_error}")
+                    with open("missing_channels_log.txt", "a") as log:
+                        log.write(f"\n=== {edf_path.name} ===\n")
+                        log.write(f"CSD failed: {csd_error}\n")
+            else:
+                print(f"[!] Skipping CSD for {edf_path.name}: No digitization points or invalid positions remain.")
+                with open("missing_channels_log.txt", "a") as log:
+                    log.write(f"\n=== {edf_path.name} ===\n")
+                    log.write("CSD skipped: Insufficient valid positions.\n")
+
+        return raw
+
+    except Exception as e:
+        print(f"❌ Error loading {edf_path}: {e}")
+        raise
