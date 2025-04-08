@@ -2,18 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 main.py - The Squiggle Interpreter: Comprehensive EEG Analysis & Report Generation
-
-This script performs the full EEG processing pipeline:
-  • Discovers EDF files (using pathlib so filenames with spaces are supported) and groups them by subject.
-  • For each subject, loads EEG data (removing "-LE", applying the standard 10–20 montage, average referencing,
-    with optional current source density transform).
-  • Computes band powers, topomaps, ERP, coherence, TFR, ICA, source localization, etc.
-  • Generates detailed clinical reports (text, CSV, and interactive HTML) including refined clinical and connectivity mappings.
-  • Optionally runs extension scripts and displays a live EEG simulation.
-  • Optionally exports EDF data metrics to CSV.
-
-Dependencies: mne, numpy, pandas, matplotlib, argparse, pathlib, rich, etc.
-Ensure that modules/clinical_report.py, modules/pyramid_model.py, and modules/data_to_csv.py are present.
 """
 
 import os
@@ -23,8 +11,18 @@ import time
 import subprocess
 import numpy as np
 import matplotlib
+import multiprocessing as mp
+import io
 
+# Set the console encoding to UTF-8 on Windows
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+# Global stop event for live display
+stop_event = threading.Event()
 matplotlib.use('Agg')
+
 from matplotlib import pyplot as plt
 import mne
 import argparse
@@ -40,9 +38,6 @@ from rich.live import Live
 from rich.panel import Panel
 from scipy.stats import zscore, pearsonr
 import pandas as pd
-
-# Global stop event for live display
-stop_event = threading.Event()
 
 # Try to import psd_welch; if unavailable, fall back to psd_array_welch.
 try:
@@ -127,7 +122,7 @@ def find_subject_edf_files(directory):
     subjects = {}
     for f in edf_files:
         f_lower = f.lower()
-        subject_id = f_lower[:2]
+        subject_id = f_lower[:2]  # Assumes first two characters are subject ID
         if subject_id not in subjects:
             subjects[subject_id] = {"EO": None, "EC": None}
         if "eo" in f_lower:
@@ -137,7 +132,32 @@ def find_subject_edf_files(directory):
     return subjects
 
 
+def execute_task(func, args):
+    return func(*args)
+
+
+def execute_task_with_queue(func, args, queue):
+    """
+    Execute a function with given arguments and put the result into a queue.
+
+    Args:
+        func (callable): The function to execute.
+        args (tuple): Arguments to pass to the function.
+        queue (multiprocessing.Queue): Queue to store the result.
+    """
+    result = func(*args)
+    queue.put(result)
+
+
 def live_eeg_display(stop_event, update_interval=1.2):
+    """
+    Display a simulated live EEG waveform in the terminal using rich.
+
+    Args:
+        stop_event (threading.Event): Event to signal when to stop the display.
+        update_interval (float): Time interval between updates in seconds (default: 1.2).
+    """
+
     def generate_eeg_wave(num_points=80):
         x = np.linspace(0, 4 * np.pi, num_points)
         wave = np.sin(x) + np.random.normal(0, 0.3, size=num_points)
@@ -150,6 +170,8 @@ def live_eeg_display(stop_event, update_interval=1.2):
         quotes = [
             "The Dude abides.",
             "That rug really tied the room together.",
+            "Yeah, well, you know, that's just, like, your opinion, man.",
+            "Watch the squiggles, man. They're pure EEG poetry.",
             "Yeah, well, you know, that's just, like, your opinion, man.",
             "Sometimes you eat the bear, and sometimes, well, the bear eats you.",
             "Watch the squiggles, man. They're pure EEG poetry.",
@@ -353,7 +375,8 @@ def parse_arguments():
         config['output_csv'] = args.output_csv
         return config
 
-    config['csd'] = (args.csd or input("Use current source density (CSD) for graphs? (y/n, default: n): ") or "n").lower() == "y"
+    config['csd'] = (args.csd or input(
+        "Use current source density (CSD) for graphs? (y/n, default: n): ") or "n").lower() == "y"
     print(f"Using CSD for graphs: {config['csd']}")
 
     if args.zscore is None:
@@ -366,11 +389,12 @@ def parse_arguments():
     else:
         config['zscore'] = args.zscore
 
-    config['report'] = (args.report or input("Generate full clinical report? (y/n, default: y): ") or "y").lower() == "y"
-    config['phenotype'] = (args.phenotype or input("Generate phenotype classification? (y/n, default: y): ") or "y").lower() == "y"
+    config['report'] = (args.report or input(
+        "Generate full clinical report? (y/n, default: y): ") or "y").lower() == "y"
+    config['phenotype'] = (args.phenotype or input(
+        "Generate phenotype classification? (y/n, default: y): ") or "y").lower() == "y"
 
     return config
-
 
 
 def setup_output_directories(project_dir, subject):
@@ -394,7 +418,9 @@ def setup_output_directories(project_dir, subject):
         "ica_eo": os.path.join(subject_folder, "ica", "EO"),
         "source": os.path.join(subject_folder, "source_localization"),
         "detailed": os.path.join(subject_folder, "detailed_site_plots"),
-        "vigilance": os.path.join(subject_folder, "vigilance")
+        "vigilance": os.path.join(subject_folder, "vigilance"),
+        "variance_eo": os.path.join(subject_folder, "variance", "EO"),  # Added for variance topomaps
+        "variance_ec": os.path.join(subject_folder, "variance", "EC")  # Added for variance topomaps
     }
     for folder in folders.values():
         os.makedirs(folder, exist_ok=True)
@@ -426,36 +452,33 @@ def load_zscore_stats(method_choice):
 
 
 from modules import io_utils
-from modules.montage_tools import validate_montage_for_csd_loreta  # New import
+from modules.montage_tools import validate_montage_for_csd_loreta
 import mne
 import os
+
 
 def load_and_preprocess_data(project_dir, files, use_csd):
     eo_file = files["EO"] if files["EO"] else files["EC"]
     ec_file = files["EC"] if files["EC"] else files["EO"]
     print(f"EO file: {eo_file}, EC file: {ec_file}")
 
-    # Handle case where no files are available
     if not eo_file and not ec_file:
         print("No EO or EC files available for processing.")
         return None, None, None, None
 
-    # Load data with fallback to None if loading fails
     raw_eo = io_utils.load_eeg_data(os.path.join(project_dir, eo_file), use_csd=False) if eo_file else None
     raw_ec = io_utils.load_eeg_data(os.path.join(project_dir, ec_file), use_csd=False) if ec_file else None
 
-    # If both are None, return early
     if raw_eo is None and raw_ec is None:
         print("Failed to load both EO and EC data.")
         return None, None, None, None
 
-    # Validate montages before CSD (logs issues but doesn’t block unless strict)
     if use_csd:
         if raw_eo:
             is_valid, status = validate_montage_for_csd_loreta(raw_eo)
-            print(f"EO Montage Validation: {'✅ Ready' if is_valid else '⚠️ Issues'}")
+            print(f"EO Montage Validation: {'Ready' if is_valid else 'Issues'}")
             if not is_valid:
-                with open(os.path.join(project_dir, "montage_validation_log.txt"), "a") as log:
+                with open(os.path.join(project_dir, "montage_validation_log.txt"), "a", encoding="utf-8") as log:
                     log.write(f"\n=== EO: {eo_file} ===\n")
                     for key, value in status.items():
                         if value and key in ["missing_channels", "overlapping_positions"]:
@@ -464,9 +487,9 @@ def load_and_preprocess_data(project_dir, files, use_csd):
                             log.write(f"{key}: {value}\n")
         if raw_ec:
             is_valid, status = validate_montage_for_csd_loreta(raw_ec)
-            print(f"EC Montage Validation: {'✅ Ready' if is_valid else '⚠️ Issues'}")
+            print(f"EC Montage Validation: {'Ready' if is_valid else 'Issues'}")
             if not is_valid:
-                with open(os.path.join(project_dir, "montage_validation_log.txt"), "a") as log:
+                with open(os.path.join(project_dir, "montage_validation_log.txt"), "a", encoding="utf-8") as log:
                     log.write(f"\n=== EC: {ec_file} ===\n")
                     for key, value in status.items():
                         if value and key in ["missing_channels", "overlapping_positions"]:
@@ -474,7 +497,6 @@ def load_and_preprocess_data(project_dir, files, use_csd):
                         elif key not in ["csd_ready", "loreta_ready"]:
                             log.write(f"{key}: {value}\n")
 
-    # Apply CSD if requested, with fallback to original data on failure
     if use_csd:
         raw_eo_csd = raw_eo.copy().load_data() if raw_eo else None
         raw_ec_csd = raw_ec.copy().load_data() if raw_ec else None
@@ -484,14 +506,14 @@ def load_and_preprocess_data(project_dir, files, use_csd):
                 print("CSD applied for graphs (EO).")
             except Exception as e:
                 print("CSD for graphs (EO) failed:", e)
-                raw_eo_csd = raw_eo  # Fallback to non-CSD data
+                raw_eo_csd = raw_eo
         if raw_ec_csd:
             try:
                 raw_ec_csd = mne.preprocessing.compute_current_source_density(raw_ec_csd)
                 print("CSD applied for graphs (EC).")
             except Exception as e:
                 print("CSD for graphs (EC) failed:", e)
-                raw_ec_csd = raw_ec  # Fallback to non-CSD data
+                raw_ec_csd = raw_ec
     else:
         raw_eo_csd = raw_eo
         raw_ec_csd = raw_ec
@@ -540,23 +562,6 @@ def compute_zscore_features(raw_eo, method_choice, published_norm_stats):
         chosen_features = standard_features
 
     return standard_features, chosen_features
-
-
-def process_vigilance(raw_eo, folders):
-    if raw_eo is None:
-        print("Skipping vigilance processing: EO data is None.")
-        return
-    vigilance_states = vigilance.compute_vigilance_states(raw_eo, epoch_length=2.0)
-    try:
-        fig = plot_vigilance_hypnogram(vigilance_states, epoch_length=2.0)
-        hypno_path = os.path.join(folders["vigilance"], "vigilance_hypnogram.png")
-        fig.savefig(hypno_path, facecolor='black')
-        plt.close(fig)
-        print(f"Saved vigilance hypnogram to {hypno_path}")
-        for t, stage in vigilance_states:
-            print(f"{t:5.1f}s: {stage}")
-    except AttributeError:
-        print("Error: 'plot_vigilance_hypnogram' not found in modules.vigilance.")
 
 
 def process_topomaps(raw, condition, folders, band_list):
@@ -645,6 +650,47 @@ def process_zscores(raw, condition, folders, band_list, norm_stats):
     return zscore_images
 
 
+# Add the missing process_variance_topomaps function
+def process_variance_topomaps(raw, condition, folders, band_list):
+    """
+    Compute and save variance topomaps for the given raw EEG data.
+
+    Args:
+        raw (mne.io.Raw): Raw EEG data (e.g., raw_eo, raw_ec)
+        condition (str): Condition identifier (e.g., 'EO', 'EC')
+        folders (dict): Dictionary containing output directory information
+        band_list (list): List of frequency bands to process
+
+    Returns:
+        dict: Mapping of band names to variance topomap file names
+    """
+    if raw is None:
+        print(f"Skipping variance topomap processing for {condition}: No data available.")
+        return {}
+
+    # Compute power spectral density (PSD)
+    psds, freqs = psd_welch(raw.get_data(), raw.info['sfreq'], fmin=1, fmax=40, n_fft=2048, verbose=False)
+    psds_db = 10 * np.log10(psds)
+    variance_maps = {}
+
+    for band in band_list:
+        band_range = processing.BANDS[band]
+        band_mask = (freqs >= band_range[0]) & (freqs <= band_range[1])
+        band_power = psds_db[:, band_mask].mean(axis=1)
+        # Compute variance across channels for this band
+        variance = np.var(band_power)
+        # Create a topomap using the band power (variance is a scalar, so we use band_power for visualization)
+        fig_variance = plotting.plot_topomap_abs_rel(band_power, [variance] * len(band_power), raw.info, band,
+                                                     f"{condition} Variance")
+        variance_path = os.path.join(folders[f"variance_{condition.lower()}"], f"variance_{band}.png")
+        fig_variance.savefig(variance_path, facecolor='black')
+        plt.close(fig_variance)
+        variance_maps[band] = os.path.basename(variance_path)
+        print(f"Saved {condition} variance topomap for {band} to {variance_path}")
+
+    return variance_maps
+
+
 def process_tfr(raw, condition, folders, band_list):
     if raw is None:
         print(f"Skipping TFR processing for {condition}: No data available.")
@@ -718,35 +764,62 @@ def process_source_localization(raw_eo, raw_ec, folders, band_list):
 
     source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eLORETA"}
     source_localization = {"EO": {}, "EC": {}}
+
+    tasks = []
+    result_queues = []
     for cond, raw_data, inv_op in [("EO", raw_eo, inv_op_eo), ("EC", raw_ec, inv_op_ec)]:
         if raw_data is None or inv_op is None:
             print(f"Skipping source localization for {cond}: No data or inverse operator available.")
             continue
         for band in band_list:
-            band_range = processing.BANDS[band]
-            raw_band = raw_data.copy().filter(band_range[0], band_range[1], verbose=False)
-            events = mne.make_fixed_length_events(raw_band, duration=2.0)
-            epochs = mne.Epochs(raw_band, events, tmin=-0.1, tmax=0.4, baseline=(None, 0),
-                                preload=True, verbose=False)
-            evoked = epochs.average()
-            cond_folder = os.path.join(folders["source"], cond)
-            os.makedirs(cond_folder, exist_ok=True)
-            for method, method_label in source_methods.items():
-                try:
-                    stc = processing.compute_source_localization(evoked, inv_op, lambda2=1.0 / 9.0, method=method_label)
-                    fig_src = plotting.plot_source_estimate(stc, view="lateral", time_point=0.1,
-                                                            subjects_dir=subjects_dir)
-                    src_filename = f"source_{cond}_{method}_{band}.png"
-                    src_path = os.path.join(cond_folder, src_filename)
-                    fig_src.savefig(src_path, dpi=150, bbox_inches="tight", facecolor="black")
-                    plt.close(fig_src)
-                    source_localization[cond].setdefault(band, {})[method] = cond + "/" + src_filename
-                    fig_src.savefig(src_path, dpi=150, bbox_inches="tight", facecolor="black")
-                    # No need to print anything unless debugging
+            q = mp.Queue()
+            tasks.append(
+                (compute_source_for_band, (cond, raw_data, inv_op, band, folders, source_methods, subjects_dir), q))
+            result_queues.append(q)
 
-                except Exception as e:
-                    print(f"Error computing source localization for {cond} {band} with {method}: {e}")
+    processes = []
+    for (func, args, queue) in tasks:
+        p = mp.Process(target=execute_task_with_queue, args=(func, args, queue))
+        processes.append(p)
+        p.start()
+
+    results = []
+    for q in result_queues:
+        result = q.get()
+        results.extend(result)
+
+    for p in processes:
+        p.join()
+
+    for cond, band, method, result in results:
+        source_localization[cond].setdefault(band, {})[method] = result
+
     return source_localization
+
+
+def compute_source_for_band(cond, raw_data, inv_op, band, folders, source_methods, subjects_dir):
+    results = []
+    band_range = processing.BANDS[band]
+    raw_band = raw_data.copy().filter(band_range[0], band_range[1], verbose=False)
+    events = mne.make_fixed_length_events(raw_band, duration=2.0)
+    epochs = mne.Epochs(raw_band, events, tmin=-0.1, tmax=0.4, baseline=(None, 0),
+                        preload=True, verbose=False)
+    evoked = epochs.average()
+    cond_folder = os.path.join(folders["source"], cond)
+    os.makedirs(cond_folder, exist_ok=True)
+    for method, method_label in source_methods.items():
+        try:
+            stc = processing.compute_source_localization(evoked, inv_op, lambda2=1.0 / 9.0, method=method_label)
+            fig_src = plotting.plot_source_estimate(stc, view="lateral", time_point=0.1,
+                                                    subjects_dir=subjects_dir)
+            src_filename = f"source_{cond}_{method}_{band}.png"
+            src_path = os.path.join(cond_folder, src_filename)
+            fig_src.savefig(src_path, dpi=150, bbox_inches="tight", facecolor="black")
+            plt.close(fig_src)
+            results.append((cond, band, method, cond + "/" + src_filename))
+        except Exception as e:
+            print(f"Error computing source localization for {cond} {band} with {method}: {e}")
+    return results
 
 
 def process_phenotype(raw_eo, subject_folder, subject):
@@ -773,10 +846,48 @@ def process_phenotype(raw_eo, subject_folder, subject):
 
 
 def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list, config, topomaps, waveforms, erp,
-                     coherence, zscores, tfr, ica, source_localization):
+                     coherence, zscores, variance, tfr, ica, source_localization):
+    """
+    Generate clinical reports and visualizations for EEG data.
+
+    Args:
+        raw_eo (mne.io.Raw): Raw EEG data for eyes-open condition
+        raw_ec (mne.io.Raw): Raw EEG data for eyes-closed condition
+        folders (dict): Dictionary of output folders
+        subject_folder (str): Path to the subject's output folder
+        subject (str): Subject identifier
+        band_list (list): List of frequency bands
+        config (dict): Configuration dictionary
+        topomaps (dict): Dictionary of topomap paths
+        waveforms (dict): Dictionary of waveform paths
+        erp (dict): Dictionary of ERP results
+        coherence (dict): Dictionary of coherence results
+        zscores (dict): Dictionary of z-scores
+        variance (dict): Dictionary of variance topomaps
+        tfr (dict): Dictionary of time-frequency results
+        ica (dict): Dictionary of ICA results
+        source_localization (dict): Dictionary of source localization results
+    """
     if raw_eo is None and raw_ec is None:
         print(f"Skipping report generation for subject {subject}: No EO or EC data available.")
         return
+
+    try:
+        if config["report"]:
+            clinical_report._generate_clinical_report(
+                raw_eo,
+                raw_ec,
+                Path(subject_folder),
+                source_localization=source_localization,
+                coherence=coherence,
+                zscores=zscores,
+                tfr=tfr,
+                ica=ica
+            )
+        if config["phenotype"]:
+            phenotype.classify_eeg_profile(raw_eo, raw_ec, subject_folder, subject, band_list)
+    except Exception as e:
+        print(f"Error generating reports for subject {subject}: {e}")
 
     bp_eo = processing.compute_all_band_powers(raw_eo) if raw_eo else {}
     bp_ec = processing.compute_all_band_powers(raw_ec) if raw_ec else {}
@@ -787,7 +898,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
         clinical.generate_site_reports(bp_eo, bp_ec, subject_folder)
 
     if config['report'] and (raw_eo or raw_ec):
-        clinical_report.generate_full_clinical_report(config['csd'], True, subject_folder, subject)
+        clinical_report._generate_clinical_report(raw_eo, raw_ec, Path(subject_folder))
 
     if raw_eo or raw_ec:
         clinical.generate_full_site_reports(raw_eo, raw_ec, folders["detailed"])
@@ -837,6 +948,32 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
                 "diff_bar": diff_bar_path_rel
             }
 
+    # Load phenotype data from file
+    phenotype_data = {}
+    phenotype_report_path = os.path.join(subject_folder, f"{subject}_phenotype.txt")
+    if os.path.exists(phenotype_report_path):
+        with open(phenotype_report_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            for line in lines[2:]:
+                if ":" in line:
+                    key, value = line.split(":", 1)
+                    phenotype_data[key.strip()] = value.strip()
+
+    # Prepare hypnogram data
+    hypnograms = {
+        "EO": {},
+        "EC": {},
+        "EO_CSD": {},
+        "EC_CSD": {}
+    }
+    available_channels = raw_eo.ch_names if raw_eo else (raw_ec.ch_names if raw_ec else [])
+    for ch_name in available_channels:
+        for condition in ["EO", "EC", "EO_CSD", "EC_CSD"]:
+            hypnogram_file = f"{condition}_{ch_name}.png"
+            hypnogram_path = os.path.join(subject_folder, hypnogram_file)
+            if os.path.exists(hypnogram_path):
+                hypnograms[condition][ch_name] = hypnogram_file
+
     report_data = {
         "global_topomaps": {
             "EO": topomaps["EO"],
@@ -854,6 +991,10 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
         "zscore": {
             "EO": zscores["EO"],
             "EC": zscores["EC"]
+        },
+        "variance": {  # Include variance topomaps
+            "EO": variance["EO"],
+            "EC": variance["EC"]
         },
         "tfr": {
             "EO": tfr["EO"],
@@ -874,7 +1015,9 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
         "tfr_path": "tfr",
         "ica_path": "ica",
         "sites_path": "",
-        "source_path": "./source_localization"
+        "source_path": "./source_localization",
+        "phenotype": phenotype_data,
+        "hypnograms": hypnograms
     }
 
     subject_report_path = os.path.join(subject_folder, "eeg_report.html")
@@ -891,6 +1034,40 @@ def run_extension_scripts(project_dir, subject):
         print(f"Subject {subject}: No extension script found in 'extensions' folder.")
 
 
+def process_vigilance(raw, subject_folder, condition, channels_to_process):
+    """
+    Process vigilance states for the given raw EEG data and plot the hypnogram.
+
+    Args:
+        raw (mne.io.Raw): Raw EEG data (e.g., raw_eo, raw_ec, raw_eo_csd, raw_ec_csd)
+        subject_folder (str): Directory where hypnogram files should be saved
+        condition (str): Condition identifier (e.g., 'EO', 'EC', 'EO_CSD', 'EC_CSD')
+        channels_to_process (list): List of channel names to process
+    """
+    if raw is None:
+        print(f"Skipping vigilance processing for {condition}: No data available.")
+        return
+
+    if not channels_to_process:
+        print(f"Skipping vigilance processing for {condition}: No channels to process.")
+        return
+
+    for channel_name in channels_to_process:
+        try:
+            vigilance_states = vigilance.compute_vigilance_states(raw, epoch_length=2.0, channel_name=channel_name)
+            # Save the hypnogram directly in subject_folder with the correct naming
+            hypnogram_filename = f"{condition}_{channel_name}.png"
+            vigilance.plot_vigilance_hypnogram(
+                vigilance_states,
+                subject_folder,  # Save directly in subject_folder
+                f"{condition}_{channel_name}",  # File name without path
+                epoch_length=2.0
+            )
+        except ValueError as e:
+            print(f"Error processing vigilance for channel '{channel_name}' in condition '{condition}': {e}")
+            continue
+
+
 def process_subject(subject, files, project_dir, config):
     overall_output_dir, folders, subject_folder = setup_output_directories(project_dir, subject)
 
@@ -898,84 +1075,270 @@ def process_subject(subject, files, project_dir, config):
     live_thread.start()
     signal.signal(signal.SIGINT, sigint_handler)
 
-    raw_eo, raw_ec, raw_eo_csd, raw_ec_csd = load_and_preprocess_data(project_dir, files, config['csd'])
-    print(f"Loaded data for subject {subject}")
+    try:
+        raw_eo, raw_ec, raw_eo_csd, raw_ec_csd = load_and_preprocess_data(project_dir, files, config['csd'])
+        print(f"Loaded data for subject {subject}")
 
-    if raw_eo is None and raw_ec is None:
-        print(f"Skipping processing for subject {subject}: No valid EEG data loaded.")
+        if raw_eo is None and raw_ec is None and raw_eo_csd is None and raw_ec_csd is None:
+            print(f"Skipping processing for subject {subject}: No valid EEG data loaded.")
+            return
+
+        # Channels to process (dynamically select available occipital channels)
+        available_channels = raw_eo.ch_names if raw_eo else (raw_ec.ch_names if raw_ec else [])
+        if not available_channels:
+            print(f"Skipping vigilance processing for subject {subject}: No channels available.")
+            return
+
+        # Prioritize occipital channels, falling back to alternatives
+        occipital_candidates = ['OZ', 'O1', 'O2', 'PZ']  # Common occipital/parietal channels
+        channels_to_process = config.get('vigilance_channels', occipital_candidates)
+        # Filter to only include channels that exist in the data
+        channels_to_process = [ch for ch in channels_to_process if
+                               ch.upper() in [c.upper() for c in available_channels]]
+
+        if not channels_to_process:
+            print(
+                f"Skipping vigilance processing for subject {subject}: No occipital channels available. Candidates: {occipital_candidates}, Available: {available_channels}")
+            return
+
+        # Normalize channels_to_process to match the case of raw_eo.ch_names (uppercase)
+        if available_channels:
+            is_uppercase = available_channels[0].isupper()
+            if is_uppercase:
+                channels_to_process = [ch.upper() for ch in channels_to_process]
+            else:
+                channels_to_process = [ch.lower() for ch in channels_to_process]
+
+            # Validate channel availability for non-CSD data
+            if raw_eo:
+                channels_to_process_eo = []
+                for ch_name in channels_to_process:
+                    if ch_name not in raw_eo.ch_names:
+                        print(
+                            f"Warning: Channel '{ch_name}' not found in raw_eo. Available channels: {raw_eo.ch_names}. Skipping this channel.")
+                        continue
+                    channels_to_process_eo.append(ch_name)
+                channels_to_process = channels_to_process_eo
+
+            if raw_ec:
+                channels_to_process_ec = []
+                for ch_name in channels_to_process:
+                    if ch_name not in raw_ec.ch_names:
+                        print(
+                            f"Warning: Channel '{ch_name}' not found in raw_ec. Available channels: {raw_ec.ch_names}. Skipping this channel.")
+                        continue
+                    channels_to_process_ec.append(ch_name)
+                channels_to_process = [ch for ch in channels_to_process if ch in channels_to_process_ec]
+
+            # Validate channel availability for CSD data
+            if raw_eo_csd:
+                channels_to_process_eo_csd = []
+                for ch_name in channels_to_process:
+                    if ch_name not in raw_eo_csd.ch_names:
+                        print(
+                            f"Warning: Channel '{ch_name}' not found in raw_eo_csd. Available channels: {raw_eo_csd.ch_names}. Skipping this channel.")
+                        continue
+                    channels_to_process_eo_csd.append(ch_name)
+                channels_to_process = [ch for ch in channels_to_process if ch in channels_to_process_eo_csd]
+
+            if raw_ec_csd:
+                channels_to_process_ec_csd = []
+                for ch_name in channels_to_process:
+                    if ch_name not in raw_ec_csd.ch_names:
+                        print(
+                            f"Warning: Channel '{ch_name}' not found in raw_ec_csd. Available channels: {raw_ec_csd.ch_names}. Skipping this channel.")
+                        continue
+                    channels_to_process_ec_csd.append(ch_name)
+                channels_to_process = [ch for ch in channels_to_process if ch in channels_to_process_ec_csd]
+
+            if not channels_to_process:
+                print(
+                    f"Skipping vigilance processing for subject {subject}: No common channels available after validation.")
+                return
+
+            # Process vigilance for all data types using the updated process_vigilance
+            if raw_eo:
+                print(f"Processing non-CSD EO data for subject {subject} using channels {channels_to_process}")
+                process_vigilance(raw_eo, subject_folder, "EO", channels_to_process)
+
+            if raw_ec:
+                print(f"Processing non-CSD EC data for subject {subject} using channels {channels_to_process}")
+                process_vigilance(raw_ec, subject_folder, "EC", channels_to_process)
+
+            if raw_eo_csd:
+                print(f"Processing CSD EO data for subject {subject} using channels {channels_to_process}")
+                process_vigilance(raw_eo_csd, subject_folder, "EO_CSD", channels_to_process)
+
+            if raw_ec_csd:
+                print(f"Processing CSD EC data for subject {subject} using channels {channels_to_process}")
+                process_vigilance(raw_ec_csd, subject_folder, "EC_CSD", channels_to_process)
+
+        norm_stats = load_zscore_stats(config['zscore'])
+        standard_features, chosen_features = compute_zscore_features(raw_eo, config['zscore'], norm_stats)
+        clinical_csv = os.path.join(project_dir, "clinical_outcomes.csv")
+        clinical_outcomes = load_clinical_outcomes(clinical_csv,
+                                                   raw_eo.info['nchan'] if raw_eo else raw_ec.info['nchan'])
+        print("Comparing standard vs. chosen z-score method:")
+        compare_zscores(standard_features, chosen_features, clinical_outcomes)
+
+        band_list = list(processing.BANDS.keys())
+
+        tasks = []
+        result_queues = []
+
+        if raw_eo_csd:
+            q = mp.Queue()
+            tasks.append((process_topomaps, (raw_eo_csd, "EO", folders, band_list), q))
+            result_queues.append(q)
+        if raw_ec_csd:
+            q = mp.Queue()
+            tasks.append((process_topomaps, (raw_ec_csd, "EC", folders, band_list), q))
+            result_queues.append(q)
+
+        if raw_eo_csd:
+            q = mp.Queue()
+            tasks.append((process_waveforms, (raw_eo_csd, "EO", folders, band_list), q))
+            result_queues.append(q)
+
+        if raw_eo_csd:
+            q = mp.Queue()
+            tasks.append((process_erp, (raw_eo_csd, "EO", folders), q))
+            result_queues.append(q)
+        if raw_ec_csd:
+            q = mp.Queue()
+            tasks.append((process_erp, (raw_ec_csd, "EC", folders), q))
+            result_queues.append(q)
+
+        if raw_eo_csd:
+            q = mp.Queue()
+            tasks.append((process_coherence, (raw_eo_csd, "EO", folders, band_list), q))
+            result_queues.append(q)
+        if raw_ec_csd:
+            q = mp.Queue()
+            tasks.append((process_coherence, (raw_ec_csd, "EC", folders, band_list), q))
+            result_queues.append(q)
+
+        if raw_eo:
+            q = mp.Queue()
+            tasks.append((process_zscores, (raw_eo, "EO", folders, band_list, norm_stats), q))
+            result_queues.append(q)
+        if raw_ec:
+            q = mp.Queue()
+            tasks.append((process_zscores, (raw_ec, "EC", folders, band_list, norm_stats), q))
+            result_queues.append(q)
+
+        # Add variance topomaps processing
+        if raw_eo:
+            q = mp.Queue()
+            tasks.append((process_variance_topomaps, (raw_eo, "EO", folders, band_list), q))
+            result_queues.append(q)
+        if raw_ec:
+            q = mp.Queue()
+            tasks.append((process_variance_topomaps, (raw_ec, "EC", folders, band_list), q))
+            result_queues.append(q)
+
+        if raw_eo_csd:
+            q = mp.Queue()
+            tasks.append((process_tfr, (raw_eo_csd, "EO", folders, band_list), q))
+            result_queues.append(q)
+        if raw_ec_csd:
+            q = mp.Queue()
+            tasks.append((process_tfr, (raw_ec_csd, "EC", folders, band_list), q))
+            result_queues.append(q)
+
+        if raw_eo_csd:
+            q = mp.Queue()
+            tasks.append((process_ica, (raw_eo_csd, "EO", folders), q))
+            result_queues.append(q)
+
+        os.environ['NUMBA_DISABLE_JIT'] = '1'
+
+        processes = []
+        for (func, args, queue) in tasks:
+            p = mp.Process(target=execute_task_with_queue, args=(func, args, queue))
+            processes.append(p)
+            p.start()
+
+        result_idx = 0
+        topomaps = {"EO": {}, "EC": {}}
+        if raw_eo_csd:
+            topomaps["EO"] = result_queues[result_idx].get()
+            result_idx += 1
+        if raw_ec_csd:
+            topomaps["EC"] = result_queues[result_idx].get()
+            result_idx += 1
+
+        waveforms = {"EO": {}}
+        if raw_eo_csd:
+            waveforms["EO"] = result_queues[result_idx].get()
+            result_idx += 1
+
+        erp = {"EO": "", "EC": ""}
+        if raw_eo_csd:
+            erp["EO"] = result_queues[result_idx].get()
+            result_idx += 1
+        if raw_ec_csd:
+            erp["EC"] = result_queues[result_idx].get()
+            result_idx += 1
+
+        coherence = {"EO": {}, "EC": {}}
+        if raw_eo_csd:
+            coherence["EO"] = result_queues[result_idx].get()
+            result_idx += 1
+        if raw_ec_csd:
+            coherence["EC"] = result_queues[result_idx].get()
+            result_idx += 1
+
+        zscores = {"EO": {}, "EC": {}}
+        if raw_eo:
+            zscores["EO"] = result_queues[result_idx].get()
+            result_idx += 1
+        if raw_ec:
+            zscores["EC"] = result_queues[result_idx].get()
+            result_idx += 1
+
+        # Collect variance topomaps
+        variance = {"EO": {}, "EC": {}}
+        if raw_eo:
+            variance["EO"] = result_queues[result_idx].get()
+            result_idx += 1
+        if raw_ec:
+            variance["EC"] = result_queues[result_idx].get()
+            result_idx += 1
+
+        tfr = {"EO": {}, "EC": {}}
+        if raw_eo_csd:
+            tfr["EO"] = result_queues[result_idx].get()
+            result_idx += 1
+        if raw_ec_csd:
+            tfr["EC"] = result_queues[result_idx].get()
+            result_idx += 1
+
+        ica = {"EO": ""}
+        if raw_eo_csd:
+            ica["EO"] = result_queues[result_idx].get()
+            result_idx += 1
+
+        for p in processes:
+            p.join()
+
+        os.environ['NUMBA_DISABLE_JIT'] = '0'
+
+        source_localization = process_source_localization(raw_eo, raw_ec, folders, band_list)
+        print("Source Localization dictionary:", source_localization)
+
+        if raw_eo:
+            process_phenotype(raw_eo, subject_folder, subject)
+
+        generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list, config, topomaps, waveforms, erp,
+                         coherence, zscores, variance, tfr, ica, source_localization)
+
+        run_extension_scripts(project_dir, subject)
+
+    finally:
         stop_event.set()
         live_thread.join()
-        return
-
-    norm_stats = load_zscore_stats(config['zscore'])
-
-    standard_features, chosen_features = compute_zscore_features(raw_eo, config['zscore'], norm_stats)
-    clinical_csv = os.path.join(project_dir, "clinical_outcomes.csv")
-    clinical_outcomes = load_clinical_outcomes(clinical_csv, raw_eo.info['nchan'] if raw_eo else raw_ec.info['nchan'])
-    print("Comparing standard vs. chosen z-score method:")
-    compare_zscores(standard_features, chosen_features, clinical_outcomes)
-
-    process_vigilance(raw_eo, folders)
-
-    band_list = list(processing.BANDS.keys())
-
-    topomaps = {"EO": {}, "EC": {}}
-    for cond, raw_data in [("EO", raw_eo_csd), ("EC", raw_ec_csd)]:
-        if raw_data:
-            dig = raw_data.info.get("dig", None)
-            has_dig = dig is not None and any(
-                d['kind'] in (FIFF.FIFFV_POINT_EEG, FIFF.FIFFV_POINT_EXTRA) for d in dig
-            )
-            if not has_dig:
-                print(f"[!] Skipping topomap processing for {cond} — no digitization data found.")
-                with open("missing_channels_log.txt", "a") as log:
-                    log.write(f"\n=== Skipped Topomaps for {cond} ===\n")
-                    log.write("No digitization data present.\n")
-                continue
-            topomaps[cond] = process_topomaps(raw_data, cond, folders, band_list)
-
-    waveforms = {
-        "EO": process_waveforms(raw_eo_csd, "EO", folders, band_list) if raw_eo_csd else {}
-    }
-
-    erp = {
-        "EO": process_erp(raw_eo_csd, "EO", folders) if raw_eo_csd else "",
-        "EC": process_erp(raw_ec_csd, "EC", folders) if raw_ec_csd else ""
-    }
-
-    coherence = {
-        "EO": process_coherence(raw_eo_csd, "EO", folders, band_list) if raw_eo_csd else {},
-        "EC": process_coherence(raw_ec_csd, "EC", folders, band_list) if raw_ec_csd else {}
-    }
-
-    zscores = {
-        "EO": process_zscores(raw_eo, "EO", folders, band_list, norm_stats) if raw_eo else {},
-        "EC": process_zscores(raw_ec, "EC", folders, band_list, norm_stats) if raw_ec else {}
-    }
-
-    tfr = {
-        "EO": process_tfr(raw_eo_csd, "EO", folders, band_list) if raw_eo_csd else {},
-        "EC": process_tfr(raw_ec_csd, "EC", folders, band_list) if raw_ec_csd else {}
-    }
-
-    ica = {
-        "EO": process_ica(raw_eo_csd, "EO", folders) if raw_eo_csd else ""
-    }
-
-    source_localization = process_source_localization(raw_eo, raw_ec, folders, band_list)
-    print("Source Localization dictionary:", source_localization)
-
-    if raw_eo:
-        process_phenotype(raw_eo, subject_folder, subject)
-
-    generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list, config, topomaps, waveforms, erp,
-                     coherence, zscores, tfr, ica, source_localization)
-
-    run_extension_scripts(project_dir, subject)
-
-    stop_event.set()
-    live_thread.join()
-    print(f"Live EEG display stopped for subject {subject}")
+        print(f"Live EEG display stopped for subject {subject}")
 
 
 def main():
