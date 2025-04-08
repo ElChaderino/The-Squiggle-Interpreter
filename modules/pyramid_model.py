@@ -206,8 +206,9 @@ CONDITION_DIFFERENTIATION = {
     "AuDHD": {
         "theta_frequencies": {"low": "1.6 Hz", "mid": "5.6-5.8 Hz"},
         "alpha_frequencies": "Persistent low alpha at 7.5 Hz",
-        "interpretation": ("Fluctuation between low theta (1.6 Hz) and mid-theta (5.6-5.8 Hz) with persistent low alpha "
-                            "suggests combined inattentiveness and internal disengagement typical of AuDHD.")
+        "interpretation": (
+            "Fluctuation between low theta (1.6 Hz) and mid-theta (5.6-5.8 Hz) with persistent low alpha "
+            "suggests combined inattentiveness and internal disengagement typical of AuDHD.")
     },
     "ADHD": {
         "theta_frequencies": {"low": "1.6 Hz", "mid": "5.6-5.8 Hz"},
@@ -218,7 +219,7 @@ CONDITION_DIFFERENTIATION = {
         "theta_frequencies": "Approximately 7.5 Hz",
         "alpha_frequencies": "Persistent low alpha (7.5 Hz)",
         "interpretation": ("A consistent 7.5 Hz in both theta and alpha ranges points to internal over-processing "
-                            "and difficulty shifting focus, common in ASD.")
+                           "and difficulty shifting focus, common in ASD.")
     },
     "Anxiety": {
         "theta_frequencies": "Decreased theta (4–7 Hz)",
@@ -270,6 +271,7 @@ LIVE_USE_SUGGESTIONS = {
     "pop_up_interventions": "Trigger pop-up interventions during vigilance dips (e.g., HRV cue, sound cue)"
 }
 
+
 # -------------------- Dynamic Helper Functions --------------------
 def suggest_pyramid_level(metrics):
     """
@@ -278,11 +280,11 @@ def suggest_pyramid_level(metrics):
        - 'theta_beta_ratio': average Theta/Beta ratio (float)
        - 'alpha_change': percentage change in Alpha power (EO→EC) (float)
        - 'vigilance_index': an optional measure of vigilance (float)
-       
+
     This function uses example threshold logic:
        - If theta_beta_ratio is between 1.5 and 2.0 and alpha_change is moderate, suggest Level 1.
        - If theta_beta_ratio is higher, suggest higher levels accordingly.
-       
+
     Returns a tuple: (level, mapping, summary)
     """
     tb = metrics.get("theta_beta_ratio")
@@ -292,7 +294,7 @@ def suggest_pyramid_level(metrics):
         summary += f"Theta/Beta Ratio = {tb:.2f}. "
     if alpha_change is not None:
         summary += f"Alpha Change = {alpha_change:.1f}%. "
-    
+
     # Example logic – adjust thresholds as needed:
     if tb is None or alpha_change is None:
         level = 1
@@ -308,34 +310,119 @@ def suggest_pyramid_level(metrics):
         level = 5
     else:
         level = 1  # default
-    
+
     mapping = REFINED_CLINICAL_MAPPING.get(level, {})
     summary += f"Suggested Level: {level} ({mapping.get('level_name', 'N/A')})."
     return level, mapping, summary
+
 
 def get_refined_mapping(level):
     """Retrieve refined clinical mapping for a given pyramid level (1–5)."""
     return REFINED_CLINICAL_MAPPING.get(level)
 
+
 def get_connectivity_mapping(level):
     """Retrieve EEG connectivity mapping for a given pyramid level (1–5)."""
     return EEG_CONNECTIVITY_MAPPING.get(level)
+
 
 def get_vigilance_logic(stage):
     """Retrieve vigilance transition logic for a given stage (e.g., 'A1', 'B2')."""
     return VIGILANCE_TRANSITION_LOGIC.get(stage.upper())
 
+
 def get_condition_differentiation(condition):
     """Retrieve EEG condition differentiation details for a given condition (e.g., 'ADHD', 'ASD')."""
     return CONDITION_DIFFERENTIATION.get(condition)
+
 
 def list_all_refined_mappings():
     """Return all refined clinical mappings as a sorted list of tuples (level, mapping)."""
     return sorted(REFINED_CLINICAL_MAPPING.items())
 
+
 def list_all_connectivity_mappings():
     """Return all EEG connectivity mappings as a sorted list of tuples (level, mapping)."""
     return sorted(EEG_CONNECTIVITY_MAPPING.items())
+
+
+def map_to_pyramid(bp_EO: dict, bp_EC: dict, site_metrics: dict, global_metrics: dict) -> list[str]:
+    """
+    Maps EEG metrics to a pyramid model for clinical interpretation using refined clinical and connectivity mappings.
+
+    Args:
+        bp_EO (dict): Band powers for eyes-open condition (channel -> band -> power)
+        bp_EC (dict): Band powers for eyes-closed condition (channel -> band -> power)
+        site_metrics (dict): Site-specific metrics (channel -> metric -> value)
+        global_metrics (dict): Global metrics (metric -> value)
+
+    Returns:
+        list[str]: List of strings representing pyramid model mappings
+    """
+    mappings = []
+
+    # Compute average Theta/Beta Ratio and Alpha Change for pyramid level suggestion
+    tb_ratios = [metrics["Theta_Beta_Ratio"] for metrics in site_metrics.values() if "Theta_Beta_Ratio" in metrics]
+    avg_tb_ratio = sum(tb_ratios) / len(tb_ratios) if tb_ratios else None
+
+    alpha_changes = []
+    for channel in bp_EO.keys():
+        if channel in bp_EC:
+            alpha_EO = bp_EO[channel].get("Alpha", 0)
+            alpha_EC = bp_EC[channel].get("Alpha", 0)
+            alpha_change = ((alpha_EC - alpha_EO) / alpha_EO * 100) if alpha_EO != 0 else 0
+            alpha_changes.append(alpha_change)
+    avg_alpha_change = sum(alpha_changes) / len(alpha_changes) if alpha_changes else None
+
+    # Suggest pyramid level based on metrics
+    metrics = {
+        "theta_beta_ratio": avg_tb_ratio,
+        "alpha_change": avg_alpha_change
+    }
+    level, mapping, summary = suggest_pyramid_level(metrics)
+    mappings.append(summary)
+
+    # Add refined clinical mapping details
+    refined_mapping = get_refined_mapping(level)
+    if refined_mapping:
+        mappings.append(f"Refined Clinical Mapping: {refined_mapping['level_name']}")
+        mappings.append("  EEG Patterns: " + ", ".join(refined_mapping["eeg_patterns"]))
+        mappings.append("  Cognitive/Behavioral Implications: " + refined_mapping["cognitive_behavior"])
+        mappings.append("  Protocols: " + refined_mapping["protocols"])
+
+    # Add connectivity mapping details
+    connectivity_mapping = get_connectivity_mapping(level)
+    if connectivity_mapping:
+        mappings.append(f"EEG Connectivity Mapping: {connectivity_mapping['level_name']}")
+        mappings.append("  EEG Patterns: " + ", ".join(connectivity_mapping["eeg_patterns"]))
+        mappings.append("  Differentiators: " + connectivity_mapping["differentiators"])
+        mappings.append("  Cognitive/Behavioral Implications: " + connectivity_mapping["cognition_behavior"])
+        mappings.append("  Vigilance Stage: " + connectivity_mapping["vigilance_stage"])
+        mappings.append("  Neurofeedback Targets: " + "; ".join(connectivity_mapping["neurofeedback_targets"]))
+
+    # Add specific metric mappings
+    for channel in bp_EO.keys():
+        if channel in bp_EC:
+            alpha_EO = bp_EO[channel].get("Alpha", 0)
+            alpha_EC = bp_EC[channel].get("Alpha", 0)
+            alpha_change = ((alpha_EC - alpha_EO) / alpha_EO * 100) if alpha_EO != 0 else 0
+            mappings.append(f"Channel {channel}: Alpha Change (EO->EC) = {alpha_change:.2f}%")
+
+    if "Frontal_Asymmetry" in global_metrics:
+        fa = global_metrics["Frontal_Asymmetry"]
+        mappings.append(f"Global: Frontal Asymmetry (F4/F3 Alpha, EO) = {fa:.2f}")
+
+    for channel, metrics in site_metrics.items():
+        if "Theta_Beta_Ratio" in metrics:
+            tbr = metrics["Theta_Beta_Ratio"]
+            mappings.append(f"Channel {channel}: Theta/Beta Ratio (EO) = {tbr:.2f}")
+
+    # If no mappings are generated, add a default message
+    if not mappings:
+        mappings.append("No pyramid mappings generated: Insufficient data")
+
+    return mappings
+
 
 if __name__ == "__main__":
     # Example dynamic usage: simulate metrics from EDF data.
@@ -346,7 +433,7 @@ if __name__ == "__main__":
     level, mapping, summary = suggest_pyramid_level(sample_metrics)
     print("Dynamic Pyramid Level Evaluation:")
     print(summary)
-    
+
     print("\n=== Refined Clinical Mapping ===")
     for lvl, mapping in list_all_refined_mappings():
         print(f"{mapping['level_name']}")
@@ -354,7 +441,7 @@ if __name__ == "__main__":
         print("  Cognitive/Behavioral Implications:", mapping["cognitive_behavior"])
         print("  Protocols:", mapping["protocols"])
         print()
-    
+
     print("\n=== EEG Connectivity Mapping ===")
     for lvl, mapping in list_all_connectivity_mappings():
         print(f"{mapping['level_name']}")
@@ -364,7 +451,7 @@ if __name__ == "__main__":
         print("  Vigilance Stage:", mapping["vigilance_stage"])
         print("  Neurofeedback Targets:", "; ".join(mapping["neurofeedback_targets"]))
         print()
-    
+
     # Example: Retrieve and display vigilance transition logic for stage A2.
     stage = "A2"
     logic = get_vigilance_logic(stage)
@@ -373,7 +460,7 @@ if __name__ == "__main__":
         print("  EEG Signature:", logic["eeg_signature"])
         print("  Clinical Meaning:", logic["clinical_meaning"])
         print("  Possible Response:", logic["possible_response"])
-    
+
     # Example: Retrieve condition differentiation for ADHD.
     condition = "ADHD"
     cond_info = get_condition_differentiation(condition)
@@ -383,7 +470,7 @@ if __name__ == "__main__":
         print("  Alpha Frequencies:", cond_info.get("alpha_frequencies", "N/A"))
         print("  Beta Frequencies:", cond_info.get("beta_frequencies", "N/A"))
         print("  Interpretation:", cond_info.get("interpretation", ""))
-    
+
     # Print live use suggestions.
     print("\nLive Use / Integration Suggestions:")
     for key, suggestion in LIVE_USE_SUGGESTIONS.items():
