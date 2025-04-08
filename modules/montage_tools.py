@@ -81,71 +81,58 @@ def inject_ch_pos(raw: mne.io.Raw, positions_dict: dict[str, tuple[float, float,
     return raw
 
 
-def validate_montage_for_csd_loreta(raw: mne.io.Raw, min_channels: int = 16, tol: float = 0.001) -> tuple[bool, dict]:
-    """
-    Validates if the montage is suitable for CSD and LORETA analysis.
-
-    Args:
-        raw (mne.io.Raw): The raw EEG data object
-        min_channels (int): Minimum number of channels required (default: 16)
-        tol (float): Tolerance for detecting overlapping positions (default: 0.001)
-
-    Returns:
-        tuple[bool, dict]: (is_valid, status_dict)
-        - is_valid: True if montage is ready for CSD/LORETA
-        - status_dict: Details on digitization, positions, and issues
-    """
+def validate_montage_for_csd_loreta(raw):
     status = {
-        "has_dig_points": False,
-        "has_unique_positions": True,
-        "valid_channels": 0,
+        "csd_ready": True,
+        "loreta_ready": True,
         "missing_channels": [],
         "overlapping_positions": [],
-        "csd_ready": False,
-        "loreta_ready": False
+        "has_dig_points": False,
+        "has_fiducials": False,
+        "has_valid_positions": False,
     }
 
-    # Check digitization points
-    dig = raw.info.get("dig", [])
+    # Check for digitization points
+    dig = raw.info.get("dig", []) or []  # Ensure dig is a list, even if None
     status["has_dig_points"] = any(d["kind"] in (FIFF.FIFFV_POINT_EEG, FIFF.FIFFV_POINT_EXTRA) for d in dig)
+    status["has_fiducials"] = any(d["kind"] == FIFF.FIFFV_POINT_CARDINAL for d in dig)
 
     # Check channel positions
-    pos = np.array([ch["loc"][:3] for ch in raw.info["chs"]])
+    ch_pos = [ch["loc"][:3] for ch in raw.info["chs"]]
     ch_names = raw.ch_names
-    valid_idx = []
+
+    # Check for missing or invalid positions
+    invalid_pos = []
+    for i, (pos, name) in enumerate(zip(ch_pos, ch_names)):
+        if not np.all(np.isfinite(pos)) or np.all(pos == 0):
+            invalid_pos.append(name)
+    status["missing_channels"] = invalid_pos
+    if invalid_pos:
+        status["csd_ready"] = False
+        status["loreta_ready"] = False
+
+    # Check for overlapping positions
     seen_pos = set()
-
-    for i, (p, name) in enumerate(zip(pos, ch_names)):
-        if not np.all(np.isfinite(p)) or np.all(p == 0):
-            status["missing_channels"].append(f"{name}: Invalid/zero position {p}")
+    overlapping = []
+    for i, (pos, name) in enumerate(zip(ch_pos, ch_names)):
+        if name in invalid_pos:
             continue
-        pos_tuple = tuple(p.round(int(-np.log10(tol))))
+        pos_tuple = tuple(pos.round(3))
         if pos_tuple in seen_pos:
-            status["overlapping_positions"].append(f"{name} overlaps at {p}")
-            status["has_unique_positions"] = False
-        else:
-            seen_pos.add(pos_tuple)
-            valid_idx.append(i)
+            overlapping.append(name)
+        seen_pos.add(pos_tuple)
+    status["overlapping_positions"] = overlapping
+    if overlapping:
+        status["csd_ready"] = False
 
-    status["valid_channels"] = len(valid_idx)
+    # Check if there are enough valid positions for CSD/LORETA
+    valid_pos_count = sum(1 for pos in ch_pos if np.all(np.isfinite(pos)) and not np.all(pos == 0))
+    status["has_valid_positions"] = valid_pos_count >= 4  # Minimum for CSD/LORETA
+    if valid_pos_count < 4:
+        status["csd_ready"] = False
+        status["loreta_ready"] = False
 
-    # CSD readiness: Need digitization and enough valid channels
-    status["csd_ready"] = status["has_dig_points"] and status["valid_channels"] >= min_channels
-
-    # LORETA readiness: Need unique positions and enough channels
-    status["loreta_ready"] = status["has_unique_positions"] and status["valid_channels"] >= min_channels
-
-    is_valid = status["csd_ready"] and status["loreta_ready"]
-
-    if not is_valid:
-        print(f"⚠️ Montage validation failed for {raw.info['meas_date']}:")
-        for key, value in status.items():
-            if key in ["missing_channels", "overlapping_positions"] and value:
-                print(f"  {key}: {value}")
-            elif key not in ["csd_ready", "loreta_ready"]:
-                print(f"  {key}: {value}")
-
-    return is_valid, status
+    return status["csd_ready"] and status["loreta_ready"], status
 
 
 if __name__ == "__main__":
