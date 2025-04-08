@@ -173,6 +173,7 @@ Improved EDF Grouping: Enhanced grouping of EDF files by subject based on consis
 
 ![Global Topos](https://github.com/user-attachments/assets/43e1a449-70c7-4fb9-a101-12e44c90137a)
 ![Global Waveforms](https://github.com/user-attachments/assets/39999f29-ceef-4eac-81c7-464736080481)
+![Variance maps](https://github.com/user-attachments/assets/2faf8099-d875-4b7f-a0cd-1617f195842e)
 ![Global Coherence](https://github.com/user-attachments/assets/973fb5f2-1469-44dd-8329-337193601a6f)
 ![Global ERP](https://github.com/user-attachments/assets/2fb74228-323b-4bc2-9c0f-c575ec95f06e)
 ![zScore Maps](https://github.com/user-attachments/assets/2555fd08-7cee-4eb5-9153-38c62cdb0c62)
@@ -181,6 +182,8 @@ Improved EDF Grouping: Enhanced grouping of EDF files by subject based on consis
 ![Loreta](https://github.com/user-attachments/assets/d7ff2947-15ac-4c23-bb2f-dd48088e9cac)
 ![PerSite PSD and Plot](https://github.com/user-attachments/assets/499084db-cf93-42d6-83ed-542d500250fa)
 ![Difference topo and bar](https://github.com/user-attachments/assets/b5257d7b-5839-41b6-832d-d1b76d026928)
+![Vigilance Maps](https://github.com/user-attachments/assets/ddf17a8f-1190-45bb-87d1-92410e48bf11)
+![Pdetection](https://github.com/user-attachments/assets/6cb71fd7-cc86-4f67-9b2e-02924790fcf4)
 
 
 Video old concept scripts in action
