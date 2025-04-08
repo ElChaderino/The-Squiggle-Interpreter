@@ -25,6 +25,19 @@
       border: 2px solid #555;
       max-width: 90%;
     }
+    .hypnogram-img {
+      width: 100%;
+      max-width: 800px;
+      height: auto;
+      border: 2px solid #666;
+      background: repeating-linear-gradient(
+        45deg,
+        #333,
+        #333 10px,
+        #444 10px,
+        #444 20px
+      ); /* Striped background for hypnograms */
+    }
     a {
       color: #66ccee;
     }
@@ -51,9 +64,11 @@
     var coherence          = {{ coherence | tojson }};
     var globalERP          = {{ global_erp | tojson }};
     var zscore             = {{ zscore | tojson }};
+    var variance           = {{ variance | tojson }};
     var tfr                = {{ tfr | tojson }};
     var ica                = {{ ica | tojson }};
     var sourceLocalization = {{ source_localization | tojson }};
+    var hypnograms         = {{ hypnograms | tojson }};
 
     var siteList = {{ site_list | tojson }};
     var bandList = {{ band_list | tojson }};
@@ -63,14 +78,15 @@
     // ---------------------------
     // 2) PATHS PASSED FROM PYTHON
     // ---------------------------
-    var topomapsPath    = "{{ global_topomaps_path }}";  // e.g., "topomaps"
-    var waveformsPath   = "{{ global_waveforms_path }}";  // e.g., "waveforms"
-    var coherencePath   = "{{ coherence_path }}";         // e.g., "coherence"
-    var erpPath         = "{{ global_erp_path }}";          // e.g., "erp"
-    var tfrPath         = "{{ tfr_path }}";                 // e.g., "tfr"
-    var icaPath         = "{{ ica_path }}";                 // e.g., "ica"
-    var sourcePath      = "{{ source_path }}";              // e.g., "source_localization"
-    var sitesPath       = "{{ sites_path }}";               // e.g., ""
+    var topomapsPath    = "{{ global_topomaps_path }}";  // Should be "topomaps"
+    var waveformsPath   = "{{ global_waveforms_path }}";
+    var coherencePath   = "{{ coherence_path }}";
+    var erpPath         = "{{ global_erp_path }}";
+    var tfrPath         = "{{ tfr_path }}";
+    var icaPath         = "{{ ica_path }}";
+    var sourcePath      = "{{ source_path }}";
+    var sitesPath       = "{{ sites_path }}";
+    var variancePath    = "topomaps";  // Points to topomaps/ folder
 
     // ---------------------------
     // 3) UTILITY FUNCTIONS
@@ -168,6 +184,22 @@
     }
 
     // ---------------------------
+    // VARIANCE TOPOMAPS
+    // ---------------------------
+    function populateVarianceDropdowns() {
+      populateDropdown("varianceCond", ["EO", "EC"]);
+      populateDropdown("varianceBand", bandList);
+      updateVarianceImage();
+    }
+    function updateVarianceImage() {
+      var cond = document.getElementById("varianceCond").value;
+      var band = document.getElementById("varianceBand").value;
+      var capitalizedBand = band.charAt(0).toUpperCase() + band.slice(1);
+      var imgName = "topomap_" + capitalizedBand + "_" + cond + ".png";
+      document.getElementById("varianceImg").src = variancePath + "/" + imgName;
+    }
+
+    // ---------------------------
     // TFR
     // ---------------------------
     function populateTfrDropdowns() {
@@ -251,8 +283,6 @@
       }
 
       if (siteDict[site] && siteDict[site][diffBand]) {
-        // Here, we assume that for the chosen difference band, the dictionary contains two keys:
-        // "diff_topo" and "diff_bar". We'll update two separate image elements.
         document.getElementById("siteDiffTopoImg").src = siteDict[site][diffBand]["diff_topo"];
         document.getElementById("siteDiffBarImg").src = siteDict[site][diffBand]["diff_bar"];
       } else {
@@ -262,18 +292,68 @@
     }
 
     // ---------------------------
+    // PER-SITE HYPNOGRAMS
+    // ---------------------------
+    function populateHypnogramDropdowns() {
+      console.log("Populating hypnogram dropdowns with hardcoded sites: ['O1', 'O2', 'PZ']");
+      populateDropdown("hypnogramSite", ["O1", "O2", "PZ"]); // Hardcode the sites
+      populateDropdown("hypnogramCond", ["EO", "EC", "EO_CSD", "EC_CSD"]);
+      updateHypnogramImage();
+    }
+    function updateHypnogramImage() {
+      var site = document.getElementById("hypnogramSite").value;
+      var cond = document.getElementById("hypnogramCond").value;
+      console.log("Updating hypnogram image. Condition:", cond, "Site:", site);
+      var imgName = "vigilance_hypnogram_" + cond + "_" + site + ".png";
+      console.log("Loading hypnogram image: " + imgName);
+      var imgElement = document.getElementById("hypnogramImg");
+      imgElement.src = imgName;
+      imgElement.onerror = function() {
+        console.error("Failed to load hypnogram image: " + imgName);
+        imgElement.src = "";
+      };
+    }
+
+    // ---------------------------
+    // PER-SITE STRIP CHARTS
+    // ---------------------------
+    function populateStripChartDropdowns() {
+      console.log("Populating strip chart dropdowns with hardcoded sites: ['O1', 'O2', 'PZ']");
+      populateDropdown("stripChartSite", ["O1", "O2", "PZ"]); // Hardcode the sites
+      populateDropdown("stripChartCond", ["EO", "EC", "EO_CSD", "EC_CSD"]);
+      updateStripChartImage();
+    }
+    function updateStripChartImage() {
+      var site = document.getElementById("stripChartSite").value;
+      var cond = document.getElementById("stripChartCond").value;
+      console.log("Updating strip chart image. Condition:", cond, "Site:", site);
+      var imgName = "vigilance_strip_" + cond + "_" + site + ".png";
+      console.log("Loading strip chart image: " + imgName);
+      var imgElement = document.getElementById("stripChartImg");
+      imgElement.src = imgName;
+      imgElement.onerror = function() {
+        console.error("Failed to load strip chart image: " + imgName);
+        imgElement.src = "";
+      };
+    }
+
+    // ---------------------------
     // ON WINDOW LOAD
     // ---------------------------
     window.onload = function() {
+      console.log("Site list from Python:", siteList);
       populateGlobalTopomapDropdowns();
       populateGlobalWaveDropdowns();
       populateGlobalCohDropdowns();
       populateGlobalERPDropdowns();
       populateZscoreDropdowns();
+      populateVarianceDropdowns();
       populateTfrDropdowns();
       populateIcaDropdowns();
       populateSourceDropdowns();
       populateSiteDropdowns();
+      populateHypnogramDropdowns();
+      populateStripChartDropdowns();
       displayPhenotype();
     };
 
@@ -337,6 +417,17 @@
     <img id="zscoreImg" src="" alt="Z-Score Topomap">
   </div>
 
+  <!-- Variance Topomaps Section -->
+  <div class="container">
+    <h2 class="section-title">Variance Topomaps</h2>
+    <label for="varianceCond">Condition:</label>
+    <select id="varianceCond" onchange="updateVarianceImage()"></select>
+    <label for="varianceBand">Band:</label>
+    <select id="varianceBand" onchange="updateVarianceImage()"></select>
+    <br>
+    <img id="varianceImg" src="" alt="Variance Topomap">
+  </div>
+
   <!-- TFR Section -->
   <div class="container">
     <h2 class="section-title">Time-Frequency Representation (TFR)</h2>
@@ -394,30 +485,33 @@
     <img id="siteDiffBarImg" src="" alt="Site Difference Bar Graph">
   </div>
 
+  <!-- Per-Site Hypnograms Section -->
+  <div class="container">
+    <h2 class="section-title">Per-Site Vigilance Hypnograms</h2>
+    <label for="hypnogramSite">Site:</label>
+    <select id="hypnogramSite" onchange="updateHypnogramImage()"></select>
+    <label for="hypnogramCond">Condition:</label>
+    <select id="hypnogramCond" onchange="updateHypnogramImage()"></select>
+    <br>
+    <img id="hypnogramImg" class="hypnogram-img" src="" alt="Vigilance Hypnogram">
+  </div>
+
+  <!-- Per-Site Strip Charts Section -->
+  <div class="container">
+    <h2 class="section-title">Per-Site Vigilance Strip Charts</h2>
+    <label for="stripChartSite">Site:</label>
+    <select id="stripChartSite" onchange="updateStripChartImage()"></select>
+    <label for="stripChartCond">Condition:</label>
+    <select id="stripChartCond" onchange="updateStripChartImage()"></select>
+    <br>
+    <img id="stripChartImg" class="hypnogram-img" src="" alt="Vigilance Strip Chart">
+  </div>
+
   <!-- Phenotype Classification Section -->
   <div class="container">
     <h2 class="section-title">Phenotype Classification</h2>
     <pre id="phenotypeDisplay" style="text-align: left; background-color: #111; padding: 15px; border: 1px solid #555;"></pre>
   </div>
 
-<script>
-  function displayPhenotype() {
-    const pheno = JSON.stringify(phenotype, null, 2);
-    document.getElementById("phenotypeDisplay").innerText = pheno || "No phenotype data found.";
-  }
-
-  window.onload = function() {
-    populateGlobalTopomapDropdowns();
-    populateGlobalWaveDropdowns();
-    populateGlobalCohDropdowns();
-    populateGlobalERPDropdowns();
-    populateZscoreDropdowns();
-    populateTfrDropdowns();
-    populateIcaDropdowns();
-    populateSourceDropdowns();
-    populateSiteDropdowns();
-    displayPhenotype();
-  };
-</script>
 </body>
 </html>
