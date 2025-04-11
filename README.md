@@ -65,111 +65,7 @@ The Squiggle Interpreter is built to analyze EEG data in EDF format and generate
   Calculates Alpha percentage shifts, Theta/Beta ratios, and other metrics.  
   Compiles all visualizations and metrics into a unified, interactive HTML report.
 
----
 
-🔄 Recent Updates
-🧠 Vigilance Module (inspired by Jay Gunkleman)
-Classifies vigilance levels based on Alpha/Theta ratios.
-
-Produces hypnogram plots and colored vigilance strips.
-
-Integrated into reports for assessing arousal stability and attentional regulation.
-
-⚡️ Current Source Density (CSD) (inspired by Jay Gunkleman)
-Adds Laplacian-transformed visualization via MNE-Python's CSD.
-
-Enhances topomap sharpness and visual clarity.
-
-Toggle-able during preprocessing for visualization only.
-
-📈 Canonical Discriminant Analysis (CDA) Prep (inspired by Jay Gunkleman)
-Backend now splits signals for CDA and source localization independently.
-
-Generates CDA-compatible outputs for regional activation comparison.
-
-Scaffolded for future CDA classifier development and group statistics support.
-
-📊 Enhanced Robust Z-Score Computation (inspired by Jay Gattis)
-Supports three z-score methods:
-
-Standard (mean/std)
-
-Robust using MAD (with iterative outlier rejection)
-
-Robust using IQR
-
-Offers an option to use published clinical norms (e.g., adult Cuban qEEG values) for clinically validated z-scores.
-
-🔍 Clinical Outcome Integration (inspired by Jay Gattis)
-Integrates clinical outcome data (loaded from CSV or dummy fallback) to compare and validate z-score methods via Pearson correlations.
-
-Facilitates direct assessment of which normalization method best correlates with clinical measures.
-
-🔗 Coherence Matrix Visualization
-Computes frequency-specific coherence matrices and visualizes them as heatmaps for both conditions (EO and EC).
-
-Provides a comprehensive view combining local power abnormalities (via z-score topomaps) and inter-channel connectivity (via coherence analysis).
-
-🧭 Source Localization Enhancements
-Added conditional referencing logic for forward modeling.
-
-Supports flexible referencing for inverse solutions.
-
-Generates visualizations per condition, frequency, and localization method.
-
-###New Features and Enhancements
-
-Comprehensive Clinical Reporting
-
-Detailed Reports: Generates comprehensive clinical reports in multiple formats (text, CSV, and interactive HTML) that now integrate the new pyramid model mappings.
-
-Pyramid Model Integration
-
-Differentiated Mappings: Incorporates differentiated and vigilance-enriched clinical mappings (Pyramid Levels 1–5) for refined clinical interpretations for each EEG channel.
-
-Pyramid Mapping Module (pyramid_model.py):
-
-Provides the data structures and functions needed to map EEG metrics to clinical interpretations.
-
-Supports various levels based on EEG patterns and cognitive/behavioral indicators:
-
-Optimal
-
-Mild Deviation
-
-Moderate Disruption
-
-Severe Dysregulation
-
-Pathological
-
-EDF-to-CSV Conversion Module (data_to_csv.py)
-Detailed CSV Exports: Exports detailed EDF data metrics (both channel-level and time-based) into CSV format.
-
-Command-Line Integration: Integrated into the CLI via a new flag (--csv), along with parameters for specifying:
-
-EDF file path
-
-Epoch length
-
-Output CSV file path
-
-Enhancements to the Main Pipeline (main.py)
-Command-Line Interface Improvements:
-
-Interactive Prompts: Now prompts for missing parameters such as:
-
-Current source density (CSD) usage (--csd)
-
-Z‑score normalization method (--zscore)
-
-Option to generate a full clinical report (--report)
-
-CSV Export Functionality: Users can export EDF data metrics to CSV by using the --csv flag with the required arguments.
-
-Pathlib Integration: Updated to use Python’s pathlib for improved support of filenames with spaces.
-
-Improved EDF Grouping: Enhanced grouping of EDF files by subject based on consistent filename conventions.
 
 ![Global Topos](https://github.com/user-attachments/assets/43e1a449-70c7-4fb9-a101-12e44c90137a)
 ![Global Waveforms](https://github.com/user-attachments/assets/39999f29-ceef-4eac-81c7-464736080481)
@@ -185,8 +81,241 @@ Improved EDF Grouping: Enhanced grouping of EDF files by subject based on consis
 ![Vigilance Maps](https://github.com/user-attachments/assets/ddf17a8f-1190-45bb-87d1-92410e48bf11)
 ![Pdetection](https://github.com/user-attachments/assets/6cb71fd7-cc86-4f67-9b2e-02924790fcf4)
 
+🔄 Recent Updates
 
-Video old concept scripts in action
+🧠 Vigilance Module (Inspired by Jay Gunkleman)
+
+Classifies vigilance levels based on Alpha/Theta ratios.
+
+Produces hypnogram plots and color-coded vigilance strips.
+
+Integrated into reports for assessing arousal stability and attentional regulation.
+
+⚡️ Current Source Density (CSD)
+
+Adds Laplacian-transformed visualization via MNE-Python's CSD.
+
+Enhances topomap sharpness and visual clarity.
+
+Toggle-able during preprocessing for visualization only.
+
+📈 Canonical Discriminant Analysis (CDA) Prep
+
+Backend now splits signals for CDA and source localization independently.
+
+Generates CDA-compatible outputs for regional activation comparison.
+
+Scaffolded for future CDA classifier development and group statistics support.
+
+📊 Enhanced Robust Z-Score Computation (Inspired by Jay Gattis)
+
+Supports three z-score methods:
+
+Standard (mean/std)
+
+Robust using MAD (with iterative outlier rejection)
+
+Robust using IQR
+
+Option to use published clinical norms (e.g., adult Cuban qEEG values) for clinically validated z-scores.
+
+🔍 Clinical Outcome Integration
+
+Integrates clinical outcome data (loaded from CSV or dummy fallback) to compare and validate z-score methods via Pearson correlations.
+
+Facilitates direct assessment of which normalization method best correlates with clinical measures.
+
+🔗 Coherence Matrix Visualization
+
+Computes frequency-specific coherence matrices.
+
+Visualizes them as heatmaps for both conditions (EO and EC).
+
+Combines local power abnormalities (z-score topomaps) and inter-channel connectivity.
+
+🧭 Source Localization Enhancements
+
+Added conditional referencing logic for forward modeling.
+
+Supports flexible referencing for inverse solutions.
+
+Generates visualizations per condition, frequency, and localization method.
+
+✨ New Features and Enhancements
+
+🧾 Comprehensive Clinical Reporting
+
+Generates detailed clinical reports in multiple formats (text, CSV, HTML).
+
+Integrated with the new Pyramid Model mappings.
+
+Built using logic from clinical_report.py, phenotype_ruleset.py, and phenotype.py
+
+🔺 Pyramid Model Integration
+
+Differentiated and vigilance-enriched clinical mappings (Pyramid Levels 1–5).
+
+Offers refined clinical interpretations per EEG channel.
+
+Levels:
+
+1 – Optimal Function: Balanced bands, strong PAF, clean asymmetry
+
+2 – Mild Drift: Elevated T/B, anterior alpha shift
+
+3 – Moderate Disruption: T/B > 3, HiBeta activity, frontal alpha drop
+
+4 – Severe Dysregulation: PAF < 8 Hz, alpha dropout, hypo-coherence
+
+5 – Pathological: Delta-dominant, multiband desynchrony
+
+🧰 Pyramid Mapping Module (pyramid_model.py)
+
+Provides data structures and functions to map EEG metrics to clinical interpretations.
+
+Supports multi-level classification based on EEG patterns and behavioral indicators.
+
+🧠 Feature Extraction (feature_extraction.py)
+
+Computes classification-ready features including:
+
+Band powers, PAF, alpha asymmetry, Theta/Beta ratio
+
+Vigilance state metrics
+
+EO/EC alpha shift, Mu suppression ratio
+
+Global coherence estimate (placeholder)
+
+📤 EDF-to-CSV Conversion Module (data_to_csv.py)
+
+Exports detailed EDF data metrics (channel-level and time-based) to CSV format.
+
+CLI flag: --csv with arguments:
+
+EDF file path
+
+Epoch length
+
+Output CSV path
+
+🧵 Enhancements to the Main Pipeline (main.py)
+
+Command-Line Interface Improvements:
+
+Interactive prompts for missing parameters:
+
+CSD usage (--csd)
+
+Z‑score method (--zscore)
+
+Clinical report generation (--report)
+
+Export CSV via --csv flag.
+
+Uses Python’s pathlib for better filename support.
+
+Improved subject grouping by filename conventions.
+
+🌈 Vigilance Strip Visualizations (State Transitions)
+
+Classifies vigilance into 6 stages using EO/EC alpha and theta dynamics.
+
+Plotted as CSD-resolved strips from posterior leads (O1, O2, Oz, Pz).
+
+Stage
+
+EEG Features
+
+Functional Interpretation
+
+A1
+
+Posterior alpha dominant
+
+Stable attention, calm alertness
+
+A2
+
+Anterior alpha emergence
+
+Reduced cognitive control, internal drift
+
+A3
+
+Anterior alpha dominant
+
+Light disengagement, low engagement
+
+B1
+
+Alpha dropout begins
+
+Elevated stress, reduced top-down control
+
+B2
+
+Frontal theta activation
+
+Emotional reactivity, attentional lability
+
+B3
+
+Dominant theta / low SMR
+
+Trauma looping, shutdown tendencies
+
+C
+
+Spindle or delta intrusion
+
+Hypoarousal, cortical disengagement
+
+🧩 Site-Based Clinical Interpretation Engine
+
+Each 10–20 site is evaluated for:
+
+Band power abnormalities
+
+EO–EC alpha reactivity (% change)
+
+Theta/Beta ratios
+
+SMR power levels
+
+Alpha asymmetries and coherence
+
+Outputs Include:
+
+Symbolic interpretation of each metric
+
+Behavioral/cognitive implications
+
+Suggested protocols (e.g., SMR uptraining, Theta inhibit)
+
+Based on:
+
+Swingle’s ClinicalQ methodology
+
+Gunkelman's EEG phenotyping
+
+Quantitative EEG literature (Johnstone, Thatcher, et al.)
+
+Integrated logic from clinical_report.py, phenotype.py, and related models
+
+📁 Output Files
+
+pyramid_mappings.txt – Global EEG profile and classification
+
+clinical_interpretations.txt – Site-by-site logic and interpretation
+
+fr_clinical_report.txt – Integrated text report (detailed findings)
+
+phenotype.txt – Optional overlays (e.g., ADHD, PTSD)
+
+vigilance_strip_*.png – Timeline visualizations per lead
+
+vigilance_hypnogram_*.png – Summary visuals (optional)
 
 [![EDF -older version concept scripts](https://img.youtube.com/vi/2CinwFa5OXo/0.jpg)](https://www.youtube.com/watch?v=2CinwFa5OXo "-older version concept scripts")
 
