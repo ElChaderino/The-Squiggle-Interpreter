@@ -564,6 +564,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
         skip_html (bool): If True, skip HTML report generation.
         **results: Visualization results (topomaps, waveforms, etc.).
     """
+    import numpy as np
     if raw_eo is None and raw_ec is None:
         logger.warning(f"Skipping report generation for subject {subject}: No EO or EC data available.")
         return
@@ -608,12 +609,13 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
         # Generate global topomaps
         global_diff_images = {}
         for band_name in band_list:
-            if raw_eo:
+            if raw_eo and raw_eo.ch_names:
                 abs_powers_eo = np.array([bp_eo[ch][band_name] for ch in raw_eo.ch_names])
                 total_powers_eo = np.array([sum(bp_eo[ch].values()) for ch in raw_eo.ch_names])
                 rel_powers_eo = np.zeros_like(abs_powers_eo)
                 mask_eo = total_powers_eo > 0
-                rel_powers_eo[mask_eo] = (abs_powers_eo[mask_eo] / total_powers_eo[mask_eo]) * 100
+                if mask_eo.any():  # Use .any() for array check
+                    rel_powers_eo[mask_eo] = (abs_powers_eo[mask_eo] / total_powers_eo[mask_eo]) * 100
                 instability_vals_eo = np.array([instability_eo[band_name][ch] for ch in raw_eo.ch_names]) if instability_eo else None
                 fig_eo = plot_topomap_abs_rel(
                     abs_powers_eo, rel_powers_eo, raw_eo, band_name, "EO", instability_vals=instability_vals_eo
@@ -624,12 +626,13 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
                     fig_eo.savefig(topo_path_eo, dpi=PLOT_CONFIG["dpi"], facecolor="black")
                     plt.close(fig_eo)
                     logger.info(f"Saved topomap for {band_name} (EO) to {topo_path_eo}")
-            if raw_ec:
+            if raw_ec and raw_ec.ch_names:
                 abs_powers_ec = np.array([bp_ec[ch][band_name] for ch in raw_ec.ch_names])
                 total_powers_ec = np.array([sum(bp_ec[ch].values()) for ch in raw_ec.ch_names])
                 rel_powers_ec = np.zeros_like(abs_powers_ec)
                 mask_ec = total_powers_ec > 0
-                rel_powers_ec[mask_ec] = (abs_powers_ec[mask_ec] / total_powers_ec[mask_ec]) * 100
+                if mask_ec.any():  # Use .any() for array check
+                    rel_powers_ec[mask_ec] = (abs_powers_ec[mask_ec] / total_powers_ec[mask_ec]) * 100
                 instability_vals_ec = np.array([instability_ec[band_name][ch] for ch in raw_ec.ch_names]) if instability_ec else None
                 fig_ec = plot_topomap_abs_rel(
                     abs_powers_ec, rel_powers_ec, raw_ec, band_name, "EC", instability_vals=instability_vals_ec
@@ -642,23 +645,24 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
                     logger.info(f"Saved topomap for {band_name} (EC) to {topo_path_ec}")
 
         # Generate difference plots
-        if raw_eo and raw_ec:
+        if raw_eo and raw_ec and raw_eo.ch_names:
             for b in band_list:
                 try:
-                    diff_vals = [bp_eo[ch][b] - bp_ec[ch][b] for ch in raw_eo.ch_names]
-                    diff_topo_fig = plot_difference_topomap(diff_vals, raw_eo.info, b)
-                    diff_bar_fig = plot_difference_bar(diff_vals, raw_eo.ch_names, b)
-                    diff_topo_path = output_dir / f"DifferenceTopomap_{b}.png"
-                    diff_bar_path = output_dir / f"DifferenceBar_{b}.png"
-                    diff_topo_fig.savefig(diff_topo_path, facecolor='black')
-                    diff_bar_fig.savefig(diff_bar_path, facecolor='black')
-                    plt.close(diff_topo_fig)
-                    plt.close(diff_bar_fig)
-                    global_diff_images[b] = {
-                        "diff_topo": os.path.basename(diff_topo_path),
-                        "diff_bar": os.path.basename(diff_bar_path)
-                    }
-                    logger.info(f"Generated global difference images for {b}: Topomap={diff_topo_path}, Bar={diff_bar_path}")
+                    diff_vals = np.array([bp_eo[ch][b] - bp_ec[ch][b] for ch in raw_eo.ch_names])
+                    if diff_vals.size > 0:  # Check array size instead of truth value
+                        diff_topo_fig = plot_difference_topomap(diff_vals, raw_eo.info, b)
+                        diff_bar_fig = plot_difference_bar(diff_vals, raw_eo.ch_names, b)
+                        diff_topo_path = output_dir / f"DifferenceTopomap_{b}.png"
+                        diff_bar_path = output_dir / f"DifferenceBar_{b}.png"
+                        diff_topo_fig.savefig(diff_topo_path, facecolor='black')
+                        diff_bar_fig.savefig(diff_bar_path, facecolor='black')
+                        plt.close(diff_topo_fig)
+                        plt.close(diff_bar_fig)
+                        global_diff_images[b] = {
+                            "diff_topo": os.path.basename(diff_topo_path),
+                            "diff_bar": os.path.basename(diff_bar_path)
+                        }
+                        logger.info(f"Generated global difference images for {b}: Topomap={diff_topo_path}, Bar={diff_bar_path}")
                 except Exception as e:
                     logger.warning(f"Failed to generate difference images for {b}: {e}")
 
