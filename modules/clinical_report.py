@@ -34,28 +34,29 @@ import os
 
 logger = logging.getLogger(__name__)
 
-def compute_site_metrics(raw_eo: mne.io.Raw, raw_ec: mne.io.Raw, bp_EO: dict, bp_EC: dict, subject_folder: str) -> tuple[dict, dict]:
+def compute_site_metrics(raw_eo: mne.io.Raw, raw_ec: mne.io.Raw, bp_eo: dict, bp_ec: dict, subject_folder: str) -> tuple[dict, dict]:
     """
     Compute site-specific and global metrics for EEG data.
     
     Args:
         raw_eo, raw_ec (mne.io.Raw): Raw EEG data for EO and EC.
-        bp_EO, bp_EC (dict): Band powers for EO and EC.
+        bp_eo, bp_ec (dict): Band powers for EO and EC.
         subject_folder (str): Path to the subject's output folder.
     
     Returns:
         tuple: (site_metrics, global_metrics)
     """
+    site_metrics = {}
+    global_metrics = {}
     if raw_eo is None and raw_ec is None:
         logger.warning("Cannot compute site metrics: No EO or EC data available.")
         return {}, {}
-    site_metrics = {}
-    global_metrics = {}
+    
     sfreq = raw_eo.info["sfreq"] if raw_eo else raw_ec.info["sfreq"]
     missing_log = Path(subject_folder) / "missing_channels_log.txt"
     
     if raw_eo and raw_ec:
-        missing_ec_channels = set(bp_EO.keys()) - set(bp_EC.keys())
+        missing_ec_channels = set(bp_eo.keys()) - set(bp_ec.keys())
         if missing_ec_channels:
             with open(missing_log, "a") as f:
                 for ch in missing_ec_channels:
@@ -63,44 +64,104 @@ def compute_site_metrics(raw_eo: mne.io.Raw, raw_ec: mne.io.Raw, bp_EO: dict, bp
                     logger.warning(f"{ch} missing from EC")
     
     channel_pairs = [("F3", "F4"), ("O1", "O2"), ("T3", "T4")]
-    for ch in bp_EO.keys():
-        if ch not in bp_EC:
+    for ch in bp_eo.keys():
+        if ch not in bp_ec:
             with open(missing_log, "a") as f:
                 f.write(f"{ch} missing from EC\n")
                 logger.warning(f"{ch} missing from EC")
             continue
         site_metrics[ch] = {}
-        alpha_EO = bp_EO[ch].get("Alpha", 0)
-        alpha_EC = bp_EC[ch].get("Alpha", 0)
-        site_metrics[ch]["Alpha_Change"] = compute_percentage_change(alpha_EO, alpha_EC)
-        site_metrics[ch]["Theta_Beta_Ratio"] = compute_theta_beta_ratio(raw_eo, ch) if raw_eo else np.nan
-        ec_sig = raw_ec.get_data(picks=[ch])[0] * 1e6 if raw_ec else np.zeros(1)
-        site_metrics[ch]["Alpha_Peak_Freq"] = compute_alpha_peak_frequency(ec_sig, sfreq, BANDS["Alpha"]) if raw_ec else np.nan
-        site_metrics[ch]["Delta_Power"] = bp_EO[ch].get("Delta", np.nan)
-        site_metrics[ch]["SMR_Power"] = bp_EO[ch].get("SMR", np.nan)
-        site_metrics[ch]["Total_Power_EO"] = sum(bp_EO[ch].values())
-        site_metrics[ch]["Total_Power_EC"] = sum(bp_EC[ch].values())
-        site_metrics[ch]["Total_Amplitude"] = alpha_EO
+        alpha_eo = bp_eo[ch].get("Alpha", 0)
+        alpha_ec = bp_ec[ch].get("Alpha", 0)
+        logger.debug(f"Channel {ch}: Alpha_EO={alpha_eo}, type={type(alpha_eo)}, Alpha_EC={alpha_ec}, type={type(alpha_ec)}")
+        if np.isscalar(alpha_eo) and np.isscalar(alpha_ec):
+            site_metrics[ch]["Alpha_Change"] = compute_percentage_change(alpha_eo, alpha_ec)
+        else:
+            site_metrics[ch]["Alpha_Change"] = np.nan
+            logger.warning(f"Invalid Alpha power for {ch}: EO={alpha_eo}, EC={alpha_ec}")
+        
+        # Theta/Beta ratio
+        if raw_eo:
+            tb_ratio = compute_theta_beta_ratio(raw_eo, ch)
+            logger.debug(f"Channel {ch}: Theta_Beta_Ratio={tb_ratio}, type={type(tb_ratio)}")
+            if np.isscalar(tb_ratio) and not np.isnan(tb_ratio):
+                site_metrics[ch]["Theta_Beta_Ratio"] = tb_ratio
+            else:
+                site_metrics[ch]["Theta_Beta_Ratio"] = np.nan
+                logger.warning(f"Invalid Theta/Beta ratio for {ch}: {tb_ratio}")
+        else:
+            site_metrics[ch]["Theta_Beta_Ratio"] = np.nan
+        
+        # Alpha peak frequency
+        if raw_ec:
+            ec_sig = raw_ec.get_data(picks=[ch])[0] * 1e6 if ch in raw_ec.ch_names else np.zeros(1)
+            apf = compute_alpha_peak_frequency(ec_sig, sfreq, BANDS["Alpha"])
+            logger.debug(f"Channel {ch}: Alpha_Peak_Freq={apf}, type={type(apf)}")
+            if np.isscalar(apf) and not np.isnan(apf):
+                site_metrics[ch]["Alpha_Peak_Freq"] = apf
+            else:
+                site_metrics[ch]["Alpha_Peak_Freq"] = np.nan
+                logger.warning(f"Invalid Alpha peak frequency for {ch}: {apf}")
+        else:
+            site_metrics[ch]["Alpha_Peak_Freq"] = np.nan
+        
+        # Delta and SMR power
+        delta = bp_eo[ch].get("Delta", np.nan)
+        smr = bp_eo[ch].get("SMR", np.nan)
+        logger.debug(f"Channel {ch}: Delta_Power={delta}, type={type(delta)}, SMR_Power={smr}, type={type(smr)}")
+        if np.isscalar(delta):
+            site_metrics[ch]["Delta_Power"] = delta
+        else:
+            site_metrics[ch]["Delta_Power"] = np.nan
+            logger.warning(f"Invalid Delta power for {ch}: {delta}")
+        if np.isscalar(smr):
+            site_metrics[ch]["SMR_Power"] = smr
+        else:
+            site_metrics[ch]["SMR_Power"] = np.nan
+            logger.warning(f"Invalid SMR power for {ch}: {smr}")
+        
+        # Total power
+        total_eo = sum(v for v in bp_eo[ch].values() if np.isscalar(v) and not np.isnan(v))
+        total_ec = sum(v for v in bp_ec[ch].values() if np.isscalar(v) and not np.isnan(v))
+        logger.debug(f"Channel {ch}: Total_Power_EO={total_eo}, type={type(total_eo)}, Total_Power_EC={total_ec}, type={type(total_ec)}")
+        site_metrics[ch]["Total_Power_EO"] = total_eo if np.isscalar(total_eo) else np.nan
+        site_metrics[ch]["Total_Power_EC"] = total_ec if np.isscalar(total_ec) else np.nan
+        site_metrics[ch]["Total_Amplitude"] = alpha_eo if np.isscalar(alpha_eo) else np.nan
+        
+        # Coherence
         for ch1, ch2 in channel_pairs:
             if ch == ch1 and raw_eo and ch2 in raw_eo.ch_names:
                 coherence_val = compute_coherence(raw_eo, ch1, ch2, BANDS["Alpha"], sfreq)
-                site_metrics[ch][f"Coherence_Alpha_{ch1}_{ch2}"] = coherence_val
-    global_metrics["Frontal_Asymmetry"] = compute_frontal_asymmetry(bp_EO) if bp_EO else np.nan
+                logger.debug(f"Channel {ch}: Coherence_Alpha_{ch1}_{ch2}={coherence_val}, type={type(coherence_val)}")
+                if np.isscalar(coherence_val) and not np.isnan(coherence_val):
+                    site_metrics[ch][f"Coherence_Alpha_{ch1}_{ch2}"] = coherence_val
+                else:
+                    site_metrics[ch][f"Coherence_Alpha_{ch1}_{ch2}"] = np.nan
+                    logger.warning(f"Invalid coherence for {ch1}-{ch2}: {coherence_val}")
+    
+    # Global metrics
+    fa = compute_frontal_asymmetry(bp_eo) if bp_eo else np.nan
+    logger.debug(f"Frontal_Asymmetry={fa}, type={type(fa)}")
+    global_metrics["Frontal_Asymmetry"] = fa if np.isscalar(fa) else np.nan
+    if not np.isscalar(global_metrics["Frontal_Asymmetry"]):
+        logger.warning(f"Invalid frontal asymmetry: {global_metrics['Frontal_Asymmetry']}")
+    
     logger.info("Computed site and global metrics.")
     return site_metrics, global_metrics
 
-def flag_abnormal(value: float, metric: str) -> str:
+def flag_abnormal(value, metric: str) -> str:
     """
     Flag metrics outside normative ranges.
     
     Args:
-        value (float): Metric value.
+        value: Metric value (scalar).
         metric (str): Metric name.
     
     Returns:
         str: Abnormality flag.
     """
-    if np.isnan(value):
+    if not np.isscalar(value) or np.isnan(value):
+        logger.debug(f"Flag_abnormal: {metric} value={value}, type={type(value)}, returning 'Not computed'")
         return "Not computed"
     if metric in NORM_VALUES:
         norm_mean = NORM_VALUES[metric]["mean"]
@@ -146,326 +207,354 @@ def generic_interpretation(band: str, value: float) -> str:
     }
     return interpretations.get(flag, {}).get(band, "")
 
-def interpret_metrics(site_metrics: dict, global_metrics: dict, bp_EO: dict, bp_EC: dict) -> list[str]:
+def interpret_metrics(site_metrics: dict, global_metrics: dict, bp_eo: dict, bp_ec: dict) -> list[str]:
     """
     Generate clinical interpretations for site and global metrics.
     
     Args:
         site_metrics (dict): Site-specific metrics.
         global_metrics (dict): Global metrics.
-        bp_EO, bp_EC (dict): Band powers for EO and EC.
+        bp_eo, bp_ec (dict): Band powers for EO and EC.
     
     Returns:
         list: Interpretation strings.
     """
     interpretations = []
-    for ch in bp_EO:
+    for ch in bp_eo:
         interpretations.append(f"\n=== Site: {ch} ===")
         site_upper = ch.upper()
         interpretations.append("Frequency Band Powers (µV²):")
-        for band, power in bp_EO[ch].items():
-            flag = flag_abnormal(power, band)
-            interpretations.append(f"  {band}: {power:.2f} ({flag})")
-            if flag != "Within normative range":
-                interpretations.append(f"    {generic_interpretation(band, power)}")
-        if site_upper in DETAILED_SITES:
+        for band, power in bp_eo[ch].items():
+            if np.isscalar(power):
+                flag = flag_abnormal(power, band)
+                interpretations.append(f"  {band}: {power:.2f} ({flag})")
+                if flag != "Within normative range":
+                    interpretations.append(f"    {generic_interpretation(band, power)}")
+            else:
+                logger.warning(f"Invalid band power for {ch} {band}: {power}")
+        
+        if site_upper in DETAILED_SITES and ch in site_metrics:
             metrics = site_metrics[ch]
-            alpha_change = metrics["Alpha_Change"]
-            flag = flag_abnormal(alpha_change, "Alpha_Change")
-            interpretations.append(f"Alpha Change (EO→EC): {alpha_change:.1f}% ({flag})")
-            if site_upper == "CZ":
-                if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+            alpha_change = metrics.get("Alpha_Change", np.nan)
+            if np.isscalar(alpha_change):
+                flag = flag_abnormal(alpha_change, "Alpha_Change")
+                interpretations.append(f"Alpha Change (EO→EC): {alpha_change:.1f}% ({flag})")
+                if site_upper == "CZ":
+                    if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+                        interpretations.extend([
+                            "  Implications: Deficits in visual processing, memory retention, and recall.",
+                            "                Poor cortical engagement during state transitions.",
+                            "                May affect learning and cognitive flexibility.",
+                            "  Recommendations: Enhance Alpha during EC for memory consolidation.",
+                            "                  Optimize modulation for cognitive flexibility.",
+                            "                  Consider neurofeedback to improve state transitions.",
+                        ])
+                    elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Cognitive fog or inefficiencies in cortical regulation.",
+                            "                May indicate over-relaxation or lack of engagement.",
+                            "                Potential for reduced cognitive performance under stress.",
+                            "  Recommendations: Enhance Beta (15-18 Hz) and SMR (12-15 Hz), reduce Theta/Delta.",
+                            "                  Consider coherence training between frontal and central regions.",
+                            "                  Monitor for signs of cognitive overload.",
+                        ])
+                elif site_upper == "O1":
+                    if alpha_change < THRESHOLDS["O1_Alpha_EC"]["low"]:
+                        interpretations.extend([
+                            "  Implications: May indicate traumatic stress or unresolved psychological trauma.",
+                            "                Potential for visual processing deficits.",
+                            "                May affect emotional regulation and stress response.",
+                            "  Recommendations: Enhance Alpha (8-12 Hz), inhibit Theta (4-7 Hz) during EC.",
+                            "                  Consider trauma-focused interventions.",
+                            "                  Monitor for signs of anxiety or hyperarousal.",
+                        ])
+                    elif alpha_change > THRESHOLDS["O1_Alpha_EC"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Suggests enhanced artistic interest or introspection.",
+                            "                May indicate overactive visual imagination.",
+                            "                Potential for dissociation or daydreaming tendencies.",
+                            "  Recommendations: Use Alpha training to balance creativity with emotional stability.",
+                            "                  Assess for dissociative tendencies.",
+                            "                  Consider grounding techniques to improve focus.",
+                        ])
+                elif site_upper == "PZ":
+                    if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+                        interpretations.extend([
+                            "  Implications: Issues with sensory integration and attention load management.",
+                            "                May affect spatial awareness and sensory processing.",
+                            "                Potential for difficulties in multitasking.",
+                            "  Recommendations: Enhance Alpha modulation, cross-check with FZ and O1.",
+                            "                  Consider sensory integration training.",
+                            "                  Monitor for attention deficits.",
+                        ])
+                    elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Over-relaxation or reduced sensory processing efficiency.",
+                            "                May indicate disengagement from sensory input.",
+                            "                Potential for reduced situational awareness.",
+                            "  Recommendations: Balance with Beta training.",
+                            "                  Enhance sensory engagement activities.",
+                            "                  Assess for signs of sensory avoidance.",
+                        ])
+                elif site_upper == "O2":
+                    if alpha_change < THRESHOLDS["O1_Alpha_EC"]["low"]:
+                        interpretations.extend([
+                            "  Implications: Visual processing issues or stress-related disturbances.",
+                            "                May affect right-hemisphere visual processing.",
+                            "                Potential for emotional dysregulation.",
+                            "  Recommendations: Enhance Alpha, assess with O1 and PZ.",
+                            "                  Consider stress management techniques.",
+                            "                  Monitor for visual processing deficits.",
+                        ])
+                    elif alpha_change > THRESHOLDS["O1_Alpha_EC"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Possible overcompensation in visual processing.",
+                            "                May indicate hyperfocus on visual stimuli.",
+                            "                Potential for visual overstimulation.",
+                            "  Recommendations: Stabilize Alpha, reduce excessive activity.",
+                            "                  Assess for visual overstimulation.",
+                            "                  Consider relaxation techniques.",
+                        ])
+                elif site_upper == "F3":
+                    if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+                        interpretations.extend([
+                            "  Implications: Reduced left frontal Alpha, may indicate hyperarousal.",
+                            "                Potential for anxiety or overthinking.",
+                            "                May affect executive function and decision-making.",
+                            "  Recommendations: Enhance Alpha to promote calm focus.",
+                            "                  Consider stress reduction techniques.",
+                            "                  Monitor for signs of anxiety.",
+                        ])
+                    elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Excessive left frontal Alpha, may indicate disengagement.",
+                            "                Potential for reduced motivation or withdrawal.",
+                            "                May affect emotional regulation.",
+                            "  Recommendations: Balance with Beta training.",
+                            "                  Assess for depressive tendencies.",
+                            "                  Consider motivational strategies.",
+                        ])
+                elif site_upper == "F4":
+                    if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+                        interpretations.extend([
+                            "  Implications: Reduced right frontal Alpha, may indicate emotional suppression.",
+                            "                Potential for withdrawal behavior.",
+                            "                May affect emotional expression.",
+                            "  Recommendations: Enhance Alpha to promote emotional balance.",
+                            "                  Consider emotional regulation training.",
+                            "                  Monitor for signs of withdrawal.",
+                        ])
+                    elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Excessive right frontal Alpha, may indicate over-relaxation.",
+                            "                Potential for reduced emotional engagement.",
+                            "                May affect social interaction.",
+                            "  Recommendations: Balance with Beta training.",
+                            "                  Assess for social withdrawal.",
+                            "                  Consider social engagement activities.",
+                        ])
+                elif site_upper == "FZ":
+                    if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+                        interpretations.extend([
+                            "  Implications: Reduced midline frontal Alpha, may indicate hyperarousal.",
+                            "                Potential for difficulties in sustained attention.",
+                            "                May affect cognitive control.",
+                            "  Recommendations: Enhance Alpha to improve focus.",
+                            "                  Consider attention training.",
+                            "                  Monitor for signs of inattention.",
+                        ])
+                    elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Excessive midline frontal Alpha, may indicate disengagement.",
+                            "                Potential for reduced cognitive effort.",
+                            "                May affect executive function.",
+                            "  Recommendations: Balance with Beta training.",
+                            "                  Assess for cognitive disengagement.",
+                            "                  Consider cognitive stimulation activities.",
+                        ])
+                elif site_upper == "T3":
+                    if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+                        interpretations.extend([
+                            "  Implications: Reduced left temporal Alpha, may indicate auditory processing issues.",
+                            "                Potential for difficulties in language comprehension.",
+                            "                May affect emotional regulation.",
+                            "  Recommendations: Enhance Alpha to improve auditory processing.",
+                            "                  Consider language-based interventions.",
+                            "                  Monitor for emotional dysregulation.",
+                        ])
+                    elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Excessive left temporal Alpha, may indicate over-relaxation.",
+                            "                Potential for reduced auditory engagement.",
+                            "                May affect verbal memory.",
+                            "  Recommendations: Balance with Beta training.",
+                            "                  Assess for auditory disengagement.",
+                            "                  Consider auditory stimulation activities.",
+                        ])
+                elif site_upper == "T4":
+                    if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+                        interpretations.extend([
+                            "  Implications: Reduced right temporal Alpha, may indicate emotional processing issues.",
+                            "                Potential for difficulties in emotional recognition.",
+                            "                May affect social interaction.",
+                            "  Recommendations: Enhance Alpha to improve emotional processing.",
+                            "                  Consider emotional recognition training.",
+                            "                  Monitor for social difficulties.",
+                        ])
+                    elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+                        interpretations.extend([
+                            "  Implications: Excessive right temporal Alpha, may indicate emotional disengagement.",
+                            "                Potential for reduced emotional awareness.",
+                            "                May affect empathy.",
+                            "  Recommendations: Balance with Beta training.",
+                            "                  Assess for emotional disengagement.",
+                            "                  Consider empathy-building activities.",
+                        ])
+            else:
+                logger.warning(f"Alpha_Change for {ch} is not scalar: {alpha_change}")
+            
+            tb_ratio = metrics.get("Theta_Beta_Ratio", np.nan)
+            if np.isscalar(tb_ratio):
+                flag = flag_abnormal(tb_ratio, "Theta_Beta_Ratio")
+                interpretations.append(f"Theta/Beta Ratio (EO): {tb_ratio:.2f} ({flag})")
+                if site_upper in {"CZ", "O1", "F3", "F4", "T3", "T4"}:
+                    if tb_ratio > THRESHOLDS["Theta_Beta_Ratio"]["severe"]:
+                        interpretations.extend([
+                            "  Severe: Indicative of ADHD-like symptoms (hyperactivity, impulsivity).",
+                            "          May significantly impact attention and impulse control.",
+                            "          Potential for academic or occupational challenges.",
+                            "  Recommendation: Inhibit Theta (4-8 Hz), enhance Beta (15-27 Hz).",
+                            "                 Consider behavioral interventions for ADHD.",
+                            "                 Monitor for co-occurring conditions like anxiety.",
+                        ])
+                    elif tb_ratio > THRESHOLDS["Theta_Beta_Ratio"]["threshold"]:
+                        interpretations.extend([
+                            "  Suggestive of attention regulation challenges.",
+                            "  May indicate mild inattention or distractibility.",
+                            "  Potential for difficulties in sustained tasks.",
+                            "  Recommendation: Monitor and consider Theta/Beta training.",
+                            "                 Assess for environmental factors affecting attention.",
+                            "                 Consider cognitive training for focus.",
+                        ])
+                if site_upper == "O1" and tb_ratio < THRESHOLDS["O1_Theta_Beta_Ratio"]["threshold"]:
                     interpretations.extend([
-                        "  Implications: Deficits in visual processing, memory retention, and recall.",
-                        "                Poor cortical engagement during state transitions.",
-                        "                May affect learning and cognitive flexibility.",
-                        "  Recommendations: Enhance Alpha during EC for memory consolidation.",
-                        "                  Optimize modulation for cognitive flexibility.",
-                        "                  Consider neurofeedback to improve state transitions.",
-                    ])
-                elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
-                    interpretations.extend([
-                        "  Implications: Cognitive fog or inefficiencies in cortical regulation.",
-                        "                May indicate over-relaxation or lack of engagement.",
-                        "                Potential for reduced cognitive performance under stress.",
-                        "  Recommendations: Enhance Beta (15-18 Hz) and SMR (12-15 Hz), reduce Theta/Delta.",
-                        "                  Consider coherence training between frontal and central regions.",
-                        "                  Monitor for signs of cognitive overload.",
-                    ])
-            elif site_upper == "O1":
-                if alpha_change < THRESHOLDS["O1_Alpha_EC"]["low"]:
-                    interpretations.extend([
-                        "  Implications: May indicate traumatic stress or unresolved psychological trauma.",
-                        "                Potential for visual processing deficits.",
-                        "                May affect emotional regulation and stress response.",
-                        "  Recommendations: Enhance Alpha (8-12 Hz), inhibit Theta (4-7 Hz) during EC.",
-                        "                  Consider trauma-focused interventions.",
-                        "                  Monitor for signs of anxiety or hyperarousal.",
-                    ])
-                elif alpha_change > THRESHOLDS["O1_Alpha_EC"]["high"]:
-                    interpretations.extend([
-                        "  Implications: Suggests enhanced artistic interest or introspection.",
-                        "                May indicate overactive visual imagination.",
-                        "                Potential for dissociation or daydreaming tendencies.",
-                        "  Recommendations: Use Alpha training to balance creativity with emotional stability.",
-                        "                  Assess for dissociative tendencies.",
-                        "                  Consider grounding techniques to improve focus.",
-                    ])
-            elif site_upper == "PZ":
-                if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
-                    interpretations.extend([
-                        "  Implications: Issues with sensory integration and attention load management.",
-                        "                May affect spatial awareness and sensory processing.",
-                        "                Potential for difficulties in multitasking.",
-                        "  Recommendations: Enhance Alpha modulation, cross-check with FZ and O1.",
-                        "                  Consider sensory integration training.",
-                        "                  Monitor for attention deficits.",
-                    ])
-                elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
-                    interpretations.extend([
-                        "  Implications: Over-relaxation or reduced sensory processing efficiency.",
-                        "                May indicate disengagement from sensory input.",
-                        "                Potential for reduced situational awareness.",
-                        "  Recommendations: Balance with Beta training.",
-                        "                  Enhance sensory engagement activities.",
-                        "                  Assess for signs of sensory avoidance.",
-                    ])
-            elif site_upper == "O2":
-                if alpha_change < THRESHOLDS["O1_Alpha_EC"]["low"]:
-                    interpretations.extend([
-                        "  Implications: Visual processing issues or stress-related disturbances.",
-                        "                May affect right-hemisphere visual processing.",
-                        "                Potential for emotional dysregulation.",
-                        "  Recommendations: Enhance Alpha, assess with O1 and PZ.",
+                        "  Implications: Reflects poor stress tolerance or heightened anxiety.",
+                        "                May indicate overactivation of visual processing.",
+                        "                Potential for stress-related visual disturbances.",
+                        "  Recommendations: Promote Theta stabilization, inhibit excessive Beta.",
                         "                  Consider stress management techniques.",
-                        "                  Monitor for visual processing deficits.",
+                        "                  Monitor for visual stress symptoms.",
                     ])
-                elif alpha_change > THRESHOLDS["O1_Alpha_EC"]["high"]:
+                elif site_upper in {"F3", "F4"} and tb_ratio > THRESHOLDS["F3F4_Theta_Beta_Ratio"]["threshold"]:
                     interpretations.extend([
-                        "  Implications: Possible overcompensation in visual processing.",
-                        "                May indicate hyperfocus on visual stimuli.",
-                        "                Potential for visual overstimulation.",
-                        "  Recommendations: Stabilize Alpha, reduce excessive activity.",
-                        "                  Assess for visual overstimulation.",
-                        "                  Consider relaxation techniques.",
-                    ])
-            elif site_upper == "F3":
-                if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
-                    interpretations.extend([
-                        "  Implications: Reduced left frontal Alpha, may indicate hyperarousal.",
-                        "                Potential for anxiety or overthinking.",
+                        "  Implications: Cognitive deficiencies, emotional volatility, or poor impulse control.",
                         "                May affect executive function and decision-making.",
-                        "  Recommendations: Enhance Alpha to promote calm focus.",
-                        "                  Consider stress reduction techniques.",
-                        "                  Monitor for signs of anxiety.",
-                    ])
-                elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
-                    interpretations.extend([
-                        "  Implications: Excessive left frontal Alpha, may indicate disengagement.",
-                        "                Potential for reduced motivation or withdrawal.",
-                        "                May affect emotional regulation.",
-                        "  Recommendations: Balance with Beta training.",
-                        "                  Assess for depressive tendencies.",
-                        "                  Consider motivational strategies.",
-                    ])
-            elif site_upper == "F4":
-                if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
-                    interpretations.extend([
-                        "  Implications: Reduced right frontal Alpha, may indicate emotional suppression.",
-                        "                Potential for withdrawal behavior.",
-                        "                May affect emotional expression.",
-                        "  Recommendations: Enhance Alpha to promote emotional balance.",
+                        "                Potential for emotional outbursts or impulsivity.",
+                        "  Recommendations: Inhibit Theta, enhance Alpha for calm alertness and executive function.",
                         "                  Consider emotional regulation training.",
-                        "                  Monitor for signs of withdrawal.",
+                        "                  Monitor for signs of impulsivity.",
                     ])
-                elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+                elif site_upper in {"T3", "T4"} and tb_ratio > THRESHOLDS["Theta_Beta_Ratio"]["threshold"]:
                     interpretations.extend([
-                        "  Implications: Excessive right frontal Alpha, may indicate over-relaxation.",
-                        "                Potential for reduced emotional engagement.",
-                        "                May affect social interaction.",
-                        "  Recommendations: Balance with Beta training.",
-                        "                  Assess for social withdrawal.",
-                        "                  Consider social engagement activities.",
-                    ])
-            elif site_upper == "FZ":
-                if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
-                    interpretations.extend([
-                        "  Implications: Reduced midline frontal Alpha, may indicate hyperarousal.",
-                        "                Potential for difficulties in sustained attention.",
-                        "                May affect cognitive control.",
-                        "  Recommendations: Enhance Alpha to improve focus.",
-                        "                  Consider attention training.",
-                        "                  Monitor for signs of inattention.",
-                    ])
-                elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
-                    interpretations.extend([
-                        "  Implications: Excessive midline frontal Alpha, may indicate disengagement.",
-                        "                Potential for reduced cognitive effort.",
-                        "                May affect executive function.",
-                        "  Recommendations: Balance with Beta training.",
-                        "                  Assess for cognitive disengagement.",
-                        "                  Consider cognitive stimulation activities.",
-                    ])
-            elif site_upper == "T3":
-                if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
-                    interpretations.extend([
-                        "  Implications: Reduced left temporal Alpha, may indicate auditory processing issues.",
-                        "                Potential for difficulties in language comprehension.",
-                        "                May affect emotional regulation.",
-                        "  Recommendations: Enhance Alpha to improve auditory processing.",
-                        "                  Consider language-based interventions.",
+                        "  Implications: Auditory processing deficits or emotional dysregulation.",
+                        "                May affect language processing or emotional recognition.",
+                        "                Potential for difficulties in social communication.",
+                        "  Recommendations: Balance Theta/Beta, target auditory processing training.",
+                        "                  Consider social skills training.",
                         "                  Monitor for emotional dysregulation.",
                     ])
-                elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+            else:
+                logger.warning(f"Theta_Beta_Ratio for {ch} is not scalar: {tb_ratio}")
+            
+            apf = metrics.get("Alpha_Peak_Freq", np.nan)
+            if np.isscalar(apf):
+                flag = flag_abnormal(apf, "Alpha_Peak_Freq")
+                interpretations.append(f"Alpha Peak Frequency (EC): {apf:.2f} Hz ({flag})")
+                if apf < THRESHOLDS["Alpha_Peak_Freq"]["low"]:
                     interpretations.extend([
-                        "  Implications: Excessive left temporal Alpha, may indicate over-relaxation.",
-                        "                Potential for reduced auditory engagement.",
-                        "                May affect verbal memory.",
-                        "  Recommendations: Balance with Beta training.",
-                        "                  Assess for auditory disengagement.",
-                        "                  Consider auditory stimulation activities.",
+                        "  Implication: Slowed Alpha peak, may indicate hypoarousal or cognitive slowing.",
+                        "               Potential for reduced cognitive processing speed.",
+                        "               May affect learning and memory.",
+                        "  Recommendation: Enhance Alpha frequency through training.",
+                        "                 Consider cognitive stimulation activities.",
+                        "                 Monitor for signs of cognitive fatigue.",
                     ])
-            elif site_upper == "T4":
-                if alpha_change < THRESHOLDS["CZ_Alpha_Percent"]["low"]:
+                elif apf > THRESHOLDS["Alpha_Peak_Freq"]["high"]:
                     interpretations.extend([
-                        "  Implications: Reduced right temporal Alpha, may indicate emotional processing issues.",
-                        "                Potential for difficulties in emotional recognition.",
-                        "                May affect social interaction.",
-                        "  Recommendations: Enhance Alpha to improve emotional processing.",
-                        "                  Consider emotional recognition training.",
-                        "                  Monitor for social difficulties.",
+                        "  Implication: Fast Alpha peak, may indicate hyperarousal or anxiety.",
+                        "               Potential for overactivation and stress.",
+                        "               May affect relaxation and sleep quality.",
+                        "  Recommendation: Stabilize Alpha frequency, reduce stress.",
+                        "                 Consider relaxation techniques.",
+                        "                 Monitor for signs of anxiety.",
                     ])
-                elif alpha_change > THRESHOLDS["CZ_Alpha_Percent"]["high"]:
+            else:
+                logger.warning(f"Alpha_Peak_Freq for {ch} is not scalar: {apf}")
+            
+            delta = metrics.get("Delta_Power", np.nan)
+            if np.isscalar(delta):
+                flag = flag_abnormal(delta, "Delta_Power")
+                interpretations.append(f"Delta Power (EO): {delta:.2f} µV² ({flag})")
+                if site_upper == "FZ" and delta > THRESHOLDS["FZ_Delta"]["min"]:
                     interpretations.extend([
-                        "  Implications: Excessive right temporal Alpha, may indicate emotional disengagement.",
-                        "                Potential for reduced emotional awareness.",
-                        "                May affect empathy.",
-                        "  Recommendations: Balance with Beta training.",
-                        "                  Assess for emotional disengagement.",
-                        "                  Consider empathy-building activities.",
+                        "  Implications: Suggests cognitive deficits, poor concentration, or delayed development.",
+                        "                May affect sustained attention and working memory.",
+                        "                Potential for academic or occupational challenges.",
+                        "  Recommendations: Inhibit Delta, enhance SMR for cognitive clarity.",
+                        "                  Consider cognitive training for attention.",
+                        "                  Monitor for developmental delays.",
                     ])
-            tb_ratio = metrics["Theta_Beta_Ratio"]
-            flag = flag_abnormal(tb_ratio, "Theta_Beta_Ratio")
-            interpretations.append(f"Theta/Beta Ratio (EO): {tb_ratio:.2f} ({flag})")
-            if site_upper in {"CZ", "O1", "F3", "F4", "T3", "T4"}:
-                if tb_ratio > THRESHOLDS["Theta_Beta_Ratio"]["severe"]:
+                elif delta > THRESHOLDS["Delta_Power"]["high"]:
                     interpretations.extend([
-                        "  Severe: Indicative of ADHD-like symptoms (hyperactivity, impulsivity).",
-                        "          May significantly impact attention and impulse control.",
-                        "          Potential for academic or occupational challenges.",
-                        "  Recommendation: Inhibit Theta (4-8 Hz), enhance Beta (15-27 Hz).",
-                        "                 Consider behavioral interventions for ADHD.",
-                        "                 Monitor for co-occurring conditions like anxiety.",
+                        "  Implication: Excessive slow-wave activity, possible cognitive deficits.",
+                        "               May indicate brain injury or neurological issues.",
+                        "               Potential for reduced cognitive performance.",
+                        "  Recommendation: Inhibit Delta (1-4 Hz), enhance SMR/Beta.",
+                        "                 Assess for neurological conditions.",
+                        "                 Monitor for cognitive impairments.",
                     ])
-                elif tb_ratio > THRESHOLDS["Theta_Beta_Ratio"]["threshold"]:
+            else:
+                logger.warning(f"Delta_Power for {ch} is not scalar: {delta}")
+            
+            smr = metrics.get("SMR_Power", np.nan)
+            if np.isscalar(smr):
+                flag = flag_abnormal(smr, "SMR_Power")
+                interpretations.append(f"SMR Power (EO): {smr:.2f} µV² ({flag})")
+                if smr < THRESHOLDS["SMR_Power"]["low"]:
                     interpretations.extend([
-                        "  Suggestive of attention regulation challenges.",
-                        "  May indicate mild inattention or distractibility.",
-                        "  Potential for difficulties in sustained tasks.",
-                        "  Recommendation: Monitor and consider Theta/Beta training.",
-                        "                 Assess for environmental factors affecting attention.",
-                        "                 Consider cognitive training for focus.",
+                        "  Implication: Low SMR, may reflect reduced calm focus or motor control.",
+                        "               Potential for impulsivity or hyperactivity.",
+                        "               May affect physical coordination.",
+                        "  Recommendation: Enhance SMR (12-15 Hz) training.",
+                        "                 Consider motor control exercises.",
+                        "                 Monitor for signs of impulsivity.",
                     ])
-            if site_upper == "O1" and tb_ratio < THRESHOLDS["O1_Theta_Beta_Ratio"]["threshold"]:
+            else:
+                logger.warning(f"SMR_Power for {ch} is not scalar: {smr}")
+            
+            total_eo = metrics.get("Total_Power_EO", np.nan)
+            total_ec = metrics.get("Total_Power_EC", np.nan)
+            if np.isscalar(total_eo) and np.isscalar(total_ec):
+                flag_eo = flag_abnormal(total_eo, "Total_Power")
+                flag_ec = flag_abnormal(total_ec, "Total_Power")
                 interpretations.extend([
-                    "  Implications: Reflects poor stress tolerance or heightened anxiety.",
-                    "                May indicate overactivation of visual processing.",
-                    "                Potential for stress-related visual disturbances.",
-                    "  Recommendations: Promote Theta stabilization, inhibit excessive Beta.",
-                    "                  Consider stress management techniques.",
-                    "                  Monitor for visual stress symptoms.",
+                    f"Total Power (EO): {total_eo:.2f} µV² ({flag_eo})",
+                    f"Total Power (EC): {total_ec:.2f} µV² ({flag_ec})",
                 ])
-            elif site_upper in {"F3", "F4"} and tb_ratio > THRESHOLDS["F3F4_Theta_Beta_Ratio"]["threshold"]:
-                interpretations.extend([
-                    "  Implications: Cognitive deficiencies, emotional volatility, or poor impulse control.",
-                    "                May affect executive function and decision-making.",
-                    "                Potential for emotional outbursts or impulsivity.",
-                    "  Recommendations: Inhibit Theta, enhance Alpha for calm alertness and executive function.",
-                    "                  Consider emotional regulation training.",
-                    "                  Monitor for signs of impulsivity.",
-                ])
-            elif site_upper in {"T3", "T4"} and tb_ratio > THRESHOLDS["Theta_Beta_Ratio"]["threshold"]:
-                interpretations.extend([
-                    "  Implications: Auditory processing deficits or emotional dysregulation.",
-                    "                May affect language processing or emotional recognition.",
-                    "                Potential for difficulties in social communication.",
-                    "  Recommendations: Balance Theta/Beta, target auditory processing training.",
-                    "                  Consider social skills training.",
-                    "                  Monitor for emotional dysregulation.",
-                ])
-            apf = metrics["Alpha_Peak_Freq"]
-            flag = flag_abnormal(apf, "Alpha_Peak_Freq")
-            interpretations.append(f"Alpha Peak Frequency (EC): {apf:.2f} Hz ({flag})")
-            if apf < THRESHOLDS["Alpha_Peak_Freq"]["low"]:
-                interpretations.extend([
-                    "  Implication: Slowed Alpha peak, may indicate hypoarousal or cognitive slowing.",
-                    "               Potential for reduced cognitive processing speed.",
-                    "               May affect learning and memory.",
-                    "  Recommendation: Enhance Alpha frequency through training.",
-                    "                 Consider cognitive stimulation activities.",
-                    "                 Monitor for signs of cognitive fatigue.",
-                ])
-            elif apf > THRESHOLDS["Alpha_Peak_Freq"]["high"]:
-                interpretations.extend([
-                    "  Implication: Fast Alpha peak, may indicate hyperarousal or anxiety.",
-                    "               Potential for overactivation and stress.",
-                    "               May affect relaxation and sleep quality.",
-                    "  Recommendation: Stabilize Alpha frequency, reduce stress.",
-                    "                 Consider relaxation techniques.",
-                    "                 Monitor for signs of anxiety.",
-                ])
-            delta = metrics["Delta_Power"]
-            flag = flag_abnormal(delta, "Delta_Power")
-            interpretations.append(f"Delta Power (EO): {delta:.2f} µV² ({flag})")
-            if site_upper == "FZ" and delta > THRESHOLDS["FZ_Delta"]["min"]:
-                interpretations.extend([
-                    "  Implications: Suggests cognitive deficits, poor concentration, or delayed development.",
-                    "                May affect sustained attention and working memory.",
-                    "                Potential for academic or occupational challenges.",
-                    "  Recommendations: Inhibit Delta, enhance SMR for cognitive clarity.",
-                    "                  Consider cognitive training for attention.",
-                    "                  Monitor for developmental delays.",
-                ])
-            elif delta > THRESHOLDS["Delta_Power"]["high"]:
-                interpretations.extend([
-                    "  Implication: Excessive slow-wave activity, possible cognitive deficits.",
-                    "               May indicate brain injury or neurological issues.",
-                    "               Potential for reduced cognitive performance.",
-                    "  Recommendation: Inhibit Delta (1-4 Hz), enhance SMR/Beta.",
-                    "                 Assess for neurological conditions.",
-                    "                 Monitor for cognitive impairments.",
-                ])
-            smr = metrics["SMR_Power"]
-            flag = flag_abnormal(smr, "SMR_Power")
-            interpretations.append(f"SMR Power (EO): {smr:.2f} µV² ({flag})")
-            if smr < THRESHOLDS["SMR_Power"]["low"]:
-                interpretations.extend([
-                    "  Implication: Low SMR, may reflect reduced calm focus or motor control.",
-                    "               Potential for impulsivity or hyperactivity.",
-                    "               May affect physical coordination.",
-                    "  Recommendation: Enhance SMR (12-15 Hz) training.",
-                    "                 Consider motor control exercises.",
-                    "                 Monitor for signs of impulsivity.",
-                ])
-            total_eo = metrics["Total_Power_EO"]
-            total_ec = metrics["Total_Power_EC"]
-            flag_eo = flag_abnormal(total_eo, "Total_Power")
-            flag_ec = flag_abnormal(total_ec, "Total_Power")
-            interpretations.extend([
-                f"Total Power (EO): {total_eo:.2f} µV² ({flag_eo})",
-                f"Total Power (EC): {total_ec:.2f} µV² ({flag_ec})",
-            ])
-            if total_eo > THRESHOLDS["Total_Power"]["high"]:
-                interpretations.extend([
-                    "  Implication: High overall power (EO), possible developmental delays.",
-                    "               May indicate excessive slow-wave activity.",
-                    "               Potential for cognitive or developmental issues.",
-                    "  Recommendation: Inhibit slow-wave activity, assess for artifacts.",
-                    "                 Consider neurological evaluation.",
-                    "                 Monitor for developmental progress.",
-                ])
-            total_amplitude = metrics["Total_Amplitude"]
-            if site_upper == "CZ" and total_amplitude > THRESHOLDS["Total_Amplitude"]["max"]:
+                if total_eo > THRESHOLDS["Total_Power"]["high"]:
+                    interpretations.extend([
+                        "  Implication: High overall power (EO), possible developmental delays.",
+                        "               May indicate excessive slow-wave activity.",
+                        "               Potential for cognitive or developmental issues.",
+                        "  Recommendation: Inhibit slow-wave activity, assess for artifacts.",
+                        "                 Consider neurological evaluation.",
+                        "                 Monitor for developmental progress.",
+                    ])
+            else:
+                logger.warning(f"Total_Power for {ch}: EO={total_eo}, EC={total_ec}")
+            
+            total_amplitude = metrics.get("Total_Amplitude", np.nan)
+            if site_upper == "CZ" and np.isscalar(total_amplitude) and total_amplitude > THRESHOLDS["Total_Amplitude"]["max"]:
                 interpretations.extend([
                     f"Total Amplitude (Alpha EO): {total_amplitude:.2f} µV²",
                     "  Implications: Potential developmental delays or cognitive deficits.",
@@ -475,8 +564,11 @@ def interpret_metrics(site_metrics: dict, global_metrics: dict, bp_EO: dict, bp_
                     "                  Assess for artifacts in data.",
                     "                  Monitor for cognitive performance.",
                 ])
+            elif not np.isscalar(total_amplitude):
+                logger.warning(f"Total_Amplitude for {ch} is not scalar: {total_amplitude}")
+            
             for metric_name, value in metrics.items():
-                if metric_name.startswith("Coherence_Alpha"):
+                if metric_name.startswith("Coherence_Alpha") and np.isscalar(value):
                     flag = flag_abnormal(value, "Coherence_Alpha")
                     interpretations.append(f"{metric_name}: {value:.2f} ({flag})")
                     if value < THRESHOLDS["Coherence_Alpha"]["low"]:
@@ -497,28 +589,35 @@ def interpret_metrics(site_metrics: dict, global_metrics: dict, bp_EO: dict, bp_
                             "                 Assess for rigidity in cognitive processing.",
                             "                 Consider flexibility training.",
                         ])
+                elif metric_name.startswith("Coherence_Alpha"):
+                    logger.warning(f"Coherence_Alpha for {ch} is not scalar: {value}")
+    
     interpretations.append("\n=== Global Metrics ===")
-    fa = global_metrics["Frontal_Asymmetry"]
-    flag = flag_abnormal(fa, "Frontal_Asymmetry")
-    interpretations.append(f"Frontal Asymmetry (F4/F3 Alpha, EO): {fa:.2f} ({flag})")
-    if fa < THRESHOLDS["Frontal_Asymmetry"]["low"]:
-        interpretations.extend([
-            "  Implication: Left-dominant asymmetry, may indicate depressive tendencies.",
-            "               Potential for reduced positive affect.",
-            "               May affect emotional well-being.",
-            "  Recommendation: Enhance right frontal Alpha, monitor emotional regulation.",
-            "                 Consider mood-focused interventions.",
-            "                 Monitor for signs of depression.",
-        ])
-    elif fa > THRESHOLDS["Frontal_Asymmetry"]["high"]:
-        interpretations.extend([
-            "  Implication: Right-dominant asymmetry, may indicate withdrawal behavior.",
-            "               Potential for reduced approach motivation.",
-            "               May affect social engagement.",
-            "  Recommendation: Enhance left frontal Alpha, assess emotional state.",
-            "                 Consider social engagement strategies.",
-            "                 Monitor for signs of withdrawal.",
-        ])
+    fa = global_metrics.get("Frontal_Asymmetry", np.nan)
+    if np.isscalar(fa):
+        flag = flag_abnormal(fa, "Frontal_Asymmetry")
+        interpretations.append(f"Frontal Asymmetry (F4/F3 Alpha, EO): {fa:.2f} ({flag})")
+        if fa < THRESHOLDS["Frontal_Asymmetry"]["low"]:
+            interpretations.extend([
+                "  Implication: Left-dominant asymmetry, may indicate depressive tendencies.",
+                "               Potential for reduced positive affect.",
+                "               May affect emotional well-being.",
+                "  Recommendation: Enhance right frontal Alpha, monitor emotional regulation.",
+                "                 Consider mood-focused interventions.",
+                "                 Monitor for signs of depression.",
+            ])
+        elif fa > THRESHOLDS["Frontal_Asymmetry"]["high"]:
+            interpretations.extend([
+                "  Implication: Right-dominant asymmetry, may indicate withdrawal behavior.",
+                "               Potential for reduced approach motivation.",
+                "               May affect social engagement.",
+                "  Recommendation: Enhance left frontal Alpha, assess emotional state.",
+                "                 Consider social engagement strategies.",
+                "                 Monitor for signs of withdrawal.",
+            ])
+    else:
+        logger.warning(f"Frontal_Asymmetry is not scalar: {fa}")
+    
     logger.info("Generated clinical interpretations.")
     return interpretations
 
@@ -538,10 +637,10 @@ def save_site_metrics(site_metrics: dict, global_metrics: dict, output_path: Pat
         rows = []
         for ch, met in site_metrics.items():
             row = {"Channel": ch}
-            row.update({key: val for key, val in met.items()})
+            row.update({key: val if np.isscalar(val) else np.nan for key, val in met.items()})
             rows.append(row)
         global_row = {"Channel": "Global"}
-        global_row.update(global_metrics)
+        global_row.update({key: val if np.isscalar(val) else np.nan for key, val in global_metrics.items()})
         rows.append(global_row)
         df = pd.DataFrame(rows)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -565,6 +664,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
         **results: Visualization results (topomaps, waveforms, etc.).
     """
     import numpy as np
+    logger.debug(f"Starting generate_reports for subject {subject}")
     if raw_eo is None and raw_ec is None:
         logger.warning(f"Skipping report generation for subject {subject}: No EO or EC data available.")
         return
@@ -584,6 +684,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
         bp_ec = compute_all_band_powers(bp_raw_ec) if bp_raw_ec else {}
         logger.info(f"Subject {subject} - Computed band powers for EO channels: {list(bp_eo.keys()) if bp_eo else 'None'}")
         logger.info(f"Subject {subject} - Computed band powers for EC channels: {list(bp_ec.keys()) if bp_ec else 'None'}")
+        logger.debug(f"bp_eo sample: {dict(list(bp_eo.items())[:1])}, bp_ec sample: {dict(list(bp_ec.items())[:1])}")
 
         # Generate text reports
         site_metrics, global_metrics = compute_site_metrics(raw_eo, raw_ec, bp_eo, bp_ec, subject_folder)
@@ -614,7 +715,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
                 total_powers_eo = np.array([sum(bp_eo[ch].values()) for ch in raw_eo.ch_names])
                 rel_powers_eo = np.zeros_like(abs_powers_eo)
                 mask_eo = total_powers_eo > 0
-                if mask_eo.any():  # Use .any() for array check
+                if mask_eo.any():
                     rel_powers_eo[mask_eo] = (abs_powers_eo[mask_eo] / total_powers_eo[mask_eo]) * 100
                 instability_vals_eo = np.array([instability_eo[band_name][ch] for ch in raw_eo.ch_names]) if instability_eo else None
                 fig_eo = plot_topomap_abs_rel(
@@ -631,7 +732,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
                 total_powers_ec = np.array([sum(bp_ec[ch].values()) for ch in raw_ec.ch_names])
                 rel_powers_ec = np.zeros_like(abs_powers_ec)
                 mask_ec = total_powers_ec > 0
-                if mask_ec.any():  # Use .any() for array check
+                if mask_ec.any():
                     rel_powers_ec[mask_ec] = (abs_powers_ec[mask_ec] / total_powers_ec[mask_ec]) * 100
                 instability_vals_ec = np.array([instability_ec[band_name][ch] for ch in raw_ec.ch_names]) if instability_ec else None
                 fig_ec = plot_topomap_abs_rel(
@@ -649,7 +750,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
             for b in band_list:
                 try:
                     diff_vals = np.array([bp_eo[ch][b] - bp_ec[ch][b] for ch in raw_eo.ch_names])
-                    if diff_vals.size > 0:  # Check array size instead of truth value
+                    if diff_vals.size > 0:
                         diff_topo_fig = plot_difference_topomap(diff_vals, raw_eo.info, b)
                         diff_bar_fig = plot_difference_bar(diff_vals, raw_eo.ch_names, b)
                         diff_topo_path = output_dir / f"DifferenceTopomap_{b}.png"
