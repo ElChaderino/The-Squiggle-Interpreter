@@ -7,10 +7,9 @@ This module orchestrates the EEG analysis pipeline for The Squiggle Interpreter.
 It integrates data loading, preprocessing, clinical analysis, plotting, phenotype classification,
 vigilance analysis, source localization, and report generation (HTML and PDF).
 """
-
 import os
 import logging
-from threading import Thread
+from threading import Thread  # Added to fix Thread error
 from multiprocessing import Process, Queue
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
@@ -18,9 +17,10 @@ import mne
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
+import gc
 from . import report
 from .pdf_report_builder import build_pdf_report
-from .clinical_report import generate_reports as generate_clinical_reports
+from .clinical_report import generate_reports as generate_clinical_reports, compute_instability_index
 
 # Configure logging to include DEBUG level
 logging.basicConfig(
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 from .live_display import live_eeg_display, stop_event
 from .io_utils import load_and_preprocess_data, setup_output_directories, load_clinical_outcomes, run_extension_scripts
 from .vigilance import process_vigilance, select_vigilance_channels
-from .clinical_report import generate_reports, process_phenotype
+from .clinical_report import process_phenotype
 from .source_localization import process_source_localization
 from .processing import compute_zscore_features, compare_zscores, compute_all_band_powers
 from .plotting import (
@@ -50,8 +50,6 @@ from .config import BANDS, load_zscore_stats, OUTPUT_FOLDERS
 from .report_writer import format_phenotype_section, write_html_report
 from .feature_extraction import extract_classification_features
 from .phenotype import classify_eeg_profile
-from .pdf_report_builder import build_pdf_report
-from . import report
 
 class TaskManager:
     def __init__(self):
@@ -390,26 +388,12 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
 
         logger.info("Report generation is enabled (config['report'] = True).")
 
-        # Log dictionaries immediately
-        logger.debug(f"topomaps: {topomaps}")
-        logger.debug(f"coherence: {coherence}")
-        logger.debug(f"zscores: {zscores}")
-        logger.debug(f"variance: {variance}")
-        logger.debug(f"tfr: {tfr}")
-        logger.debug(f"waveforms: {waveforms}")
-        logger.debug(f"erp: {erp}")
-        logger.debug(f"ica: {ica}")
-        logger.debug(f"band_list: {band_list}")
-        logger.debug(f"phenotype_data: {phenotype_data}")
-
         # Compute band powers
         logger.info("Step 7.1: Computing band powers...")
         bp_eo = compute_all_band_powers(raw_eo) if raw_eo else {}
         bp_ec = compute_all_band_powers(raw_ec) if raw_ec else {}
         logger.info(f"Subject {subject} - Computed band powers for EO channels: {list(bp_eo.keys()) if bp_eo else 'None'}")
         logger.info(f"Subject {subject} - Computed band powers for EC channels: {list(bp_ec.keys()) if bp_ec else 'None'}")
-        logger.debug(f"Sample bp_eo: {list(bp_eo.items())[:1]}")
-        logger.debug(f"Sample bp_ec: {list(bp_ec.items())[:1]}")
 
         # Generate clinical site reports
         logger.info("Step 7.2: Generating clinical site reports...")
@@ -506,15 +490,7 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
             "EO_CSD": {},
             "EC_CSD": {}
         }
-        if raw_eo:
-            logger.debug(f"Type of raw_eo.ch_names: {type(raw_eo.ch_names)}")
-            logger.debug(f"raw_eo.ch_names: {raw_eo.ch_names}")
-        if raw_ec:
-            logger.debug(f"Type of raw_ec.ch_names: {type(raw_ec.ch_names)}")
-            logger.debug(f"raw_ec.ch_names: {raw_ec.ch_names}")
         available_channels = raw_eo.ch_names if raw_eo else (raw_ec.ch_names if raw_ec else [])
-        logger.debug(f"Type of available_channels: {type(available_channels)}")
-        logger.debug(f"available_channels: {available_channels}")
         for ch_name in available_channels:
             if not isinstance(ch_name, str):
                 logger.error(f"Found non-string channel name: {ch_name} (type: {type(ch_name)})")
@@ -525,7 +501,6 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
                 if os.path.exists(hypnogram_path):
                     hypnograms[condition][ch_name] = hypnogram_file
         logger.info(f"Completed Step 7.6: Hypnogram data prepared: {hypnograms}")
-        logger.debug(f"hypnograms: {hypnograms}")
 
         # Prepare report data for HTML
         logger.info("Step 7.7: Preparing report data for HTML generation...")
@@ -575,9 +550,6 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
             "hypnograms": hypnograms,
             "phenotype_html": format_phenotype_section(phenotype_data)
         }
-        logger.debug(f"Report data prepared. Keys: {list(report_data.keys())}")
-        logger.debug(f"Sample data: global_topomaps={report_data['global_topomaps']}")
-        logger.debug(f"Sample data: site_dict={dict(list(report_data['site_dict'].items())[:1])}")
         logger.info("Completed Step 7.7: Report data preparation")
 
         # Generate HTML report
@@ -638,71 +610,6 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
     except Exception as e:
         logger.error(f"Error generating reports for subject {subject}: {e}")
         raise
-
-        # Generate text reports via clinical_report.py
-        logger.info("Step 7.10: Generating text reports via clinical_report...")
-        try:
-            generate_clinical_reports(
-                raw_eo=raw_eo,
-                raw_ec=raw_ec,
-                folders=folders,
-                subject_folder=subject_folder,
-                subject=subject,
-                band_list=band_list,
-                config=config,
-                topomaps=topomaps,
-                waveforms=waveforms,
-                erp=erp,
-                coherence=coherence,
-                zscores=zscores,
-                variance=variance,
-                tfr=tfr,
-                ica=ica,
-                source_localization=source_localization,
-                phenotype_data=phenotype_data,
-                site_dict=site_dict,
-                skip_html=True  # Prevent duplicate HTML report
-            )
-            logger.info("Completed text report generation via clinical_report.")
-        except Exception as e:
-            logger.error(f"Failed to generate text reports via clinical_report: {e}")
-
-    except Exception as e:
-        logger.error(f"Error generating reports for subject {subject}: {e}")
-        raise
-
-        # Generate text reports via clinical_report.py
-        logger.info("Step 7.10: Generating text reports via clinical_report...")
-        try:
-            generate_clinical_reports(
-                raw_eo=raw_eo,
-                raw_ec=raw_ec,
-                folders=folders,
-                subject_folder=subject_folder,
-                subject=subject,
-                band_list=band_list,
-                config=config,
-                topomaps=topomaps,
-                waveforms=waveforms,
-                erp=erp,
-                coherence=coherence,
-                zscores=zscores,
-                variance=variance,
-                tfr=tfr,
-                ica=ica,
-                source_localization=source_localization,
-                phenotype_data=phenotype_data,
-                site_dict=site_dict,
-                skip_html=True  # Prevent duplicate HTML report
-            )
-            logger.info("Completed text report generation via clinical_report.")
-        except Exception as e:
-            logger.error(f"Failed to generate text reports via clinical_report: {e}")
-
-    except Exception as e:
-        logger.error(f"Error generating reports for subject {subject}: {e}")
-        raise
-
 def main():
     config = parse_arguments()
     project_dir = config['data_dir']
