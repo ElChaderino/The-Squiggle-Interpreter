@@ -53,6 +53,18 @@
       border-bottom: 2px solid #555;
       padding-bottom: 10px;
     }
+    table {
+      margin: 20px auto;
+      border-collapse: collapse;
+      background-color: #333;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #555;
+    }
+    th {
+      background-color: #444;
+    }
   </style>
 
   <script>
@@ -73,7 +85,6 @@
     var siteList = {{ site_list | tojson }};
     var bandList = {{ band_list | tojson }};
     var siteDict = {{ site_dict | tojson }};
-    var phenotype = {{ phenotype | default({}) | tojson }};
 
     // ---------------------------
     // 2) PATHS PASSED FROM PYTHON
@@ -354,13 +365,7 @@
       populateSiteDropdowns();
       populateHypnogramDropdowns();
       populateStripChartDropdowns();
-      displayPhenotype();
     };
-
-    function displayPhenotype() {
-      const pheno = JSON.stringify(phenotype, null, 2);
-      document.getElementById("phenotypeDisplay").innerText = pheno || "No phenotype data found.";
-    }
   </script>
 </head>
 <body>
@@ -510,7 +515,7 @@
   <!-- Phenotype Classification Section -->
   <div class="container">
     <h2 class="section-title">Phenotype Classification</h2>
-    <pre id="phenotypeDisplay" style="text-align: left; background-color: #111; padding: 15px; border: 1px solid #555;"></pre>
+    {{ phenotype_html | safe }}
   </div>
 
 </body>
