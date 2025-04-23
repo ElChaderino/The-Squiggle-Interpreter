@@ -1,245 +1,156 @@
-# modules/processing.py
+"""
+Advanced Signal Processing and Analysis Module
+
+This module provides functions for:
+  - Basic power analysis for predefined frequency bands.
+  - Derived metrics (percentage change, theta–beta ratio).
+  - Advanced metrics: entropy (sample, spectral, LZiv), fractal dimension (Higuchi),
+    and detrended fluctuation analysis (DFA) on epochs.
+  - Robust z-score computation using median and MAD.
+  - Advanced analysis functions: Phase–Amplitude Coupling (PAC) analysis, Brain Symmetry Index (BSI),
+    and connectivity (coherence) analysis.
+  - Pseudo-ERP computation.
+  - Time-Frequency Representation (TFR) computation using Morlet wavelets.
+  - ICA computation.
+  - Additionally, compute_all_zscore_maps() and compute_all_tfr_maps() are added to compute robust
+    z-score topomaps and TFR maps for each frequency band.
+  - **New: Source Localization Functions** – compute_inverse_operator() and compute_source_localization().
+
+Dependencies:
+  - numpy
+  - mne
+  - scipy (for coherence, welch, and hilbert)
+  - matplotlib.pyplot
+  - antropy (for sample_entropy, spectral_entropy, lziv_complexity)
+  - nolds (for DFA)
+"""
+
 import numpy as np
 import mne
 from scipy.signal import coherence, welch, hilbert
+import matplotlib.pyplot as plt
 import nolds
 from antropy import sample_entropy, spectral_entropy, lziv_complexity
-from scipy.stats import zscore, pearsonr
-import matplotlib.pyplot as plt
 import logging
-import os
 from pathlib import Path
-from mne.time_frequency import psd_array_welch, tfr_morlet
-from .config import BANDS, load_zscore_stats, PLOT_CONFIG, OUTPUT_FOLDERS
+from . import plotting
+import time
+import multiprocessing as mp
+import sys
+import os
+
+# Simple local implementation for now if utils not created
+def execute_task(func, args):
+    try:
+        return func(*args)
+    except Exception as e:
+        logging.error(f"Error in task {func.__name__}: {e}", exc_info=True)
+        return None
+
+def execute_task_with_queue(func, args, queue):
+    try:
+        result = func(*args)
+        queue.put(result)
+    except Exception as e:
+        logging.error(f"Error executing {func.__name__} in queue task: {e}", exc_info=True)
+        queue.put(f"ERROR: {e}")
 
 logger = logging.getLogger(__name__)
+
+# Define standard frequency bands.
+BANDS = {
+    "Delta": (1, 4),
+    "Theta": (4, 8),
+    "Alpha": (8, 12),
+    "SMR": (12, 15),
+    "Beta": (15, 27),
+    "HighBeta": (28, 38),
+}
+
+# ------------------ Basic Metrics ------------------
 
 def compute_band_power(data, sfreq, band):
     """
     Filter the signal to a specified frequency band and compute mean power.
     
-    Args:
-        data (np.array): 1D signal array.
-        sfreq (float): Sampling frequency in Hz.
-        band (tuple): Frequency band (fmin, fmax).
+    Parameters:
+      data (np.array): 1D signal array.
+      sfreq (float): Sampling frequency in Hz.
+      band (tuple): Frequency band (fmin, fmax).
     
     Returns:
-        float: Mean power in the band.
+      float: Mean power in the band.
     """
-    if data is None or not data.size:
-        logger.warning(f"Invalid data for band {band}.")
-        return 0.0
-    try:
-        fmin, fmax = band
-        data_filt = mne.filter.filter_data(data, sfreq, fmin, fmax, verbose=False)
-        power = np.mean(data_filt ** 2)
-        logger.debug(f"Computed band power for {band}: {power:.2f}")
-        return power
-    except Exception as e:
-        logger.warning(f"Failed to compute band power for {band}: {e}")
-        return 0.0
+    fmin, fmax = band
+    data_filt = mne.filter.filter_data(data, sfreq, fmin, fmax, verbose=False)
+    return np.mean(data_filt ** 2)
 
 def compute_all_band_powers(raw):
     """
     Compute mean power for each channel and for all defined frequency bands.
     
-    Args:
-        raw (mne.io.Raw): MNE Raw object.
-    
+    Parameters:
+      raw (mne.io.Raw): MNE Raw object.
+      
     Returns:
-        dict: {channel: {band: power, ...}, ...}
+      dict: {channel: {band: power, ...}, ...}
     """
-    if raw is None:
-        logger.warning("Cannot compute band powers: No data available.")
-        return {}
     sfreq = raw.info["sfreq"]
-    data = raw.get_data() * 1e6  # Convert to microvolts
+    data = raw.get_data() * 1e6  # Convert to microvolts.
     results = {}
     for i, ch in enumerate(raw.ch_names):
         results[ch] = {}
         for band_name, band_range in BANDS.items():
             results[ch][band_name] = compute_band_power(data[i], sfreq, band_range)
-    logger.info(f"Computed band powers for {raw.info['description']}: {list(results.keys())}")
     return results
-
-def compute_alpha_peak_frequency(data, sfreq, freq_range):
-    """
-    Compute the peak frequency in the alpha band.
-    
-    Args:
-        data (np.ndarray): 1D signal array.
-        sfreq (float): Sampling frequency.
-        freq_range (tuple): Frequency range (fmin, fmax).
-    
-    Returns:
-        float: Peak frequency.
-    """
-    if data is None or not data.size:
-        logger.warning("Cannot compute alpha peak frequency: Invalid data.")
-        return np.nan
-    fmin, fmax = freq_range
-    freqs, psd = welch(data, fs=sfreq, nperseg=int(sfreq * 2), noverlap=int(sfreq))
-    alpha_mask = (freqs >= fmin) & (freqs <= fmax)
-    if not np.any(alpha_mask):
-        logger.warning(f"No frequencies in alpha range {freq_range}.")
-        return np.nan
-    alpha_freqs = freqs[alpha_mask]
-    alpha_psd = psd[alpha_mask]
-    peak_freq = float(alpha_freqs[np.argmax(alpha_psd)])
-    logger.debug(f"Computed alpha peak frequency: {peak_freq:.2f} Hz")
-    return peak_freq
-
-def compute_frontal_asymmetry(bp_EO, ch_left="F3", ch_right="F4"):
-    """
-    Compute alpha asymmetry between left and right frontal channels.
-    
-    Args:
-        bp_EO (dict): Band powers for EO condition.
-        ch_left, ch_right (str): Left and right channel names.
-    
-    Returns:
-        float: Frontal asymmetry value.
-    """
-    try:
-        alpha_left = bp_EO[ch_left]["Alpha"]
-        alpha_right = bp_EO[ch_right]["Alpha"]
-        if alpha_left == 0 or alpha_right == 0:
-            logger.warning(f"Zero alpha power for {ch_left} or {ch_right}.")
-            return np.nan
-        asymmetry = float(np.log(alpha_right / alpha_left))
-        logger.debug(f"Computed frontal asymmetry: {asymmetry:.2f}")
-        return asymmetry
-    except KeyError as e:
-        logger.warning(f"Cannot compute frontal asymmetry: {e}")
-        return np.nan
-
-def compute_instability_index(raw, bands):
-    """
-    Compute variance-based instability index for each band.
-    
-    Args:
-        raw (mne.io.Raw): Raw EEG data.
-        bands (dict): Dictionary of band names and frequency ranges.
-    
-    Returns:
-        dict: {band: {channel: variance, ...}, ...}
-    """
-    if raw is None:
-        logger.warning("Cannot compute instability index: No data available.")
-        return {}
-    sfreq = raw.info["sfreq"]
-    data = raw.get_data() * 1e6
-    instability = {}
-    for band_name, (fmin, fmax) in bands.items():
-        data_filt = mne.filter.filter_data(data, sfreq, fmin, fmax, verbose=False)
-        variance = np.var(data_filt, axis=1)
-        instability[band_name] = {ch: float(var) for ch, var in zip(raw.ch_names, variance)}
-        logger.debug(f"Instability Index (Variance) for {band_name}: {instability[band_name]}")
-    return instability
-
-def compute_coherence(raw, ch1, ch2, band, sfreq, log_freqs=False):
-    """
-    Compute coherence between two channels for a specified band.
-    
-    Args:
-        raw (mne.io.Raw): Raw EEG data.
-        ch1, ch2 (str): Channel names.
-        band (tuple): Frequency band (fmin, fmax).
-        sfreq (float): Sampling frequency.
-        log_freqs (bool): Whether to log frequency-specific coherence values.
-    
-    Returns:
-        float: Average coherence value.
-    """
-    if raw is None or ch1 not in raw.ch_names or ch2 not in raw.ch_names:
-        logger.warning(f"Cannot compute coherence for {ch1}-{ch2}: Invalid data or channels.")
-        return np.nan
-    fmin, fmax = band
-    data = raw.get_data(picks=[ch1, ch2]) * 1e6
-    duration = 2.0
-    events = mne.make_fixed_length_events(raw, duration=duration)
-    epochs = mne.Epochs(raw, events, tmin=0, tmax=duration, picks=[ch1, ch2], baseline=None, preload=True, verbose=False)
-    epochs_data = epochs.get_data() * 1e6
-    csd_obj = mne.time_frequency.csd_array_fourier(
-        epochs_data, sfreq=sfreq, fmin=fmin, fmax=fmax, n_fft=int(sfreq * 2)
-    )
-    freqs = csd_obj.frequencies
-    coherence_values = []
-    if log_freqs:
-        logger.debug(f"Coherence Values for {ch1}-{ch2} in {band[0]}-{band[1]} Hz:")
-    for f in freqs:
-        csd = csd_obj.get_data(frequency=f)
-        psd1 = np.abs(csd[0, 0])
-        psd2 = np.abs(csd[1, 1])
-        csd12 = np.abs(csd[0, 1])
-        coherence = csd12 ** 2 / (psd1 * psd2 + 1e-10)
-        coherence_values.append(coherence)
-        if log_freqs:
-            logger.debug(f"Frequency {f:.1f} Hz: Coherence = {coherence:.3f}")
-    if not coherence_values:
-        logger.warning(f"No coherence values computed for {ch1}-{ch2} in {band}.")
-        return np.nan
-    coherence_avg = np.mean(coherence_values)
-    logger.debug(f"Average Coherence for {ch1}-{ch2}: {coherence_avg:.3f}")
-    return float(coherence_avg)
 
 def compute_percentage_change(power_EO, power_EC):
     """
     Compute percentage change from EO to EC.
     
-    Args:
-        power_EO (float): Power in EO condition.
-        power_EC (float): Power in EC condition.
+    Parameters:
+      power_EO (float): Power in EO condition.
+      power_EC (float): Power in EC condition.
     
     Returns:
-        float: Percentage change.
+      float: Percentage change.
     """
     if power_EO == 0:
-        logger.warning("EO power is zero; cannot compute percentage change.")
         return np.nan
-    change = ((power_EC - power_EO) / power_EO) * 100
-    logger.debug(f"Computed percentage change: {change:.2f}%")
-    return change
+    return ((power_EC - power_EO) / power_EO) * 100
 
 def compute_theta_beta_ratio(raw, ch):
     """
     Compute the Theta/Beta power ratio for a specific channel.
     
-    Args:
-        raw (mne.io.Raw): MNE Raw object.
-        ch (str): Channel name.
+    Parameters:
+      raw (mne.io.Raw): MNE Raw object.
+      ch (str): Channel name.
     
     Returns:
-        float: Theta/Beta ratio.
+      float: Theta/Beta ratio.
     """
-    if raw is None or ch not in raw.ch_names:
-        logger.warning(f"Cannot compute theta/beta ratio for channel {ch}: Invalid data or channel.")
-        return np.nan
     sfreq = raw.info["sfreq"]
     data = raw.get_data(picks=[ch])[0] * 1e6
     theta = compute_band_power(data, sfreq, BANDS["Theta"])
     beta = compute_band_power(data, sfreq, BANDS["Beta"])
     if beta == 0:
-        logger.warning(f"Beta power is zero for channel {ch}; cannot compute ratio.")
         return np.nan
-    ratio = theta / beta
-    logger.debug(f"Computed Theta/Beta ratio for {ch}: {ratio:.2f}")
-    return ratio
+    return theta / beta
+
+# ------------------ Advanced Metrics ------------------
 
 def higuchi_fd(X, kmax):
     """
     Compute the Higuchi Fractal Dimension of a signal.
     
-    Args:
-        X (np.array): 1D signal.
-        kmax (int): Maximum interval.
-    
+    Parameters:
+      X (np.array): 1D signal.
+      kmax (int): Maximum interval.
+      
     Returns:
-        float: Estimated fractal dimension.
+      float: Estimated fractal dimension.
     """
-    if X is None or not X.size:
-        logger.warning("Invalid signal for Higuchi FD computation.")
-        return np.nan
     N = len(X)
     L = []
     x_vals = []
@@ -256,490 +167,592 @@ def higuchi_fd(X, kmax):
             L.append(np.mean(Lk))
             x_vals.append(np.log(1.0 / k))
     L = np.log(np.array(L))
-    try:
-        slope = np.polyfit(x_vals, L, 1)[0]
-        logger.debug(f"Computed Higuchi FD: {slope:.2f}")
-        return slope
-    except Exception as e:
-        logger.warning(f"Failed to compute Higuchi FD: {e}")
-        return np.nan
+    slope = np.polyfit(x_vals, L, 1)[0]
+    return slope
 
 def compute_dfa_on_epochs(signal, sfreq, epoch_len_sec=2.0):
     """
     Compute Detrended Fluctuation Analysis (DFA) on epochs of the signal.
     
-    Args:
-        signal (np.array): 1D signal.
-        sfreq (float): Sampling frequency.
-        epoch_len_sec (float): Epoch duration in seconds.
-    
+    Parameters:
+      signal (np.array): 1D signal.
+      sfreq (float): Sampling frequency.
+      epoch_len_sec (float): Epoch duration in seconds.
+      
     Returns:
-        float or None: Average DFA value across epochs.
+      float or None: Average DFA value across epochs.
     """
-    if signal is None or not signal.size:
-        logger.warning("Invalid signal for DFA computation.")
-        return None
     epoch_len = int(epoch_len_sec * sfreq)
     n_epochs = len(signal) // epoch_len
     if n_epochs == 0:
-        logger.warning("No epochs available for DFA computation.")
         return None
     dfa_vals = []
     for i in range(n_epochs):
-        epoch = signal[i * epoch_len: (i + 1) * epoch_len]
+        epoch = signal[i * epoch_len : (i + 1) * epoch_len]
         try:
             dfa_vals.append(nolds.dfa(epoch))
-        except Exception as e:
-            logger.warning(f"Failed to compute DFA for epoch {i}: {e}")
+        except Exception:
             continue
-    dfa_avg = np.mean(dfa_vals) if dfa_vals else None
-    if dfa_avg is not None:
-        logger.debug(f"Computed average DFA: {dfa_avg:.2f}")
-    return dfa_avg
+    return np.mean(dfa_vals) if dfa_vals else None
 
 def compute_entropy_on_epochs(signal, sfreq, epoch_len_sec=2.0):
     """
-    Compute epoch-averaged entropy metrics: Sample Entropy, Spectral Entropy, Lempel-Ziv Complexity.
-    
-    Args:
-        signal (np.array): 1D signal.
-        sfreq (float): Sampling frequency.
-        epoch_len_sec (float): Epoch duration in seconds.
-    
+    Compute epoch-averaged entropy metrics:
+      - Sample Entropy
+      - Spectral Entropy
+      - Lempel-Ziv Complexity
+      
+    Parameters:
+      signal (np.array): 1D signal.
+      sfreq (float): Sampling frequency.
+      epoch_len_sec (float): Epoch duration in seconds.
+      
     Returns:
-        tuple: (average sample entropy, average spectral entropy, average LZ complexity)
+      tuple: (average sample entropy, average spectral entropy, average LZ complexity)
     """
-    if signal is None or not signal.size:
-        logger.warning("Invalid signal for entropy computation.")
-        return None, None, None
     epoch_len = int(epoch_len_sec * sfreq)
     n_epochs = len(signal) // epoch_len
     if n_epochs == 0:
-        logger.warning("No epochs available for entropy computation.")
         return None, None, None
     sampents, specents, lzivs = [], [], []
     for i in range(n_epochs):
-        epoch = signal[i * epoch_len: (i + 1) * epoch_len]
+        epoch = signal[i * epoch_len : (i + 1) * epoch_len]
         try:
             sampents.append(sample_entropy(epoch))
             specents.append(spectral_entropy(epoch, sfreq, method="welch", normalize=True))
             lzivs.append(lziv_complexity(epoch))
-        except Exception as e:
-            logger.warning(f"Failed to compute entropy for epoch {i}: {e}")
+        except Exception:
             continue
-    sampent_avg = np.mean(sampents) if sampents else None
-    specent_avg = np.mean(specents) if specents else None
-    lziv_avg = np.mean(lzivs) if lzivs else None
-    if any(avg is not None for avg in [sampent_avg, specent_avg, lziv_avg]):
-        logger.debug(f"Computed entropy: Sample={sampent_avg:.2f}, Spectral={specent_avg:.2f}, LZ={lziv_avg:.2f}")
-    return sampent_avg, specent_avg, lziv_avg
+    return (np.mean(sampents) if sampents else None,
+            np.mean(specents) if specents else None,
+            np.mean(lzivs) if lzivs else None)
 
 def compute_robust_zscore(power, norm_median, norm_mad):
     """
     Compute robust z-score using median and median absolute deviation (MAD).
     
-    Args:
-        power (float): Observed power.
-        norm_median (float): Normative median.
-        norm_mad (float): Normative MAD.
-    
+    Parameters:
+      power (float): Observed power.
+      norm_median (float): Normative median.
+      norm_mad (float): Normative MAD.
+      
     Returns:
-        float: Robust z-score.
+      float: Robust z-score.
     """
     if norm_mad == 0:
-        logger.warning("MAD is zero; using default scale of 1.")
         norm_mad = 1
-    zscore_val = (power - norm_median) / norm_mad
-    logger.debug(f"Computed robust z-score: {zscore_val:.2f}")
-    return zscore_val
+    return (power - norm_median) / norm_mad
 
 def compute_all_zscore_maps(raw, norm_stats_dict, epoch_len_sec=2.0):
-    """
-    Compute robust z-score maps for each frequency band.
+    """Compute robust z-score maps for each frequency band.
     
-    Args:
-        raw (mne.io.Raw): Raw EEG data.
-        norm_stats_dict (dict): Normative statistics for each band.
-        epoch_len_sec (float): Epoch duration in seconds.
-    
+    If norm_stats_dict is None, computes z-scores relative to the current data's median/MAD.
+
+    Parameters:
+      raw (mne.io.Raw): Raw EEG data.
+      norm_stats_dict (dict): Normative statistics for each band.
+      epoch_len_sec (float): Epoch duration in seconds.
+      
     Returns:
-        dict: {band: list of z-scores for each channel}
+      dict: {band: list of z-scores for each channel}
     """
-    if raw is None:
-        logger.warning("Cannot compute z-score maps: No data available.")
-        return {}
     sfreq = raw.info["sfreq"]
     data = raw.get_data() * 1e6
     zscore_maps = {}
     for band, band_range in BANDS.items():
         band_powers = [compute_band_power(data[i], sfreq, band_range) for i in range(data.shape[0])]
-        stats = norm_stats_dict.get(band, {
-            "median": np.median(band_powers),
-            "mad": np.median(np.abs(band_powers - np.median(band_powers)))
-        })
-        z_scores = [compute_robust_zscore(p, stats["median"], stats["mad"]) for p in band_powers]
+        
+        # Handle the case where pre-computed norms are not provided
+        if norm_stats_dict is None:
+            # Calculate median and MAD from the current data's band powers
+            current_median = np.median(band_powers)
+            current_mad = np.median(np.abs(band_powers - current_median))
+            stats = {"median": current_median, "mad": current_mad}
+        else:
+            # Use pre-computed norms, falling back to current data if band missing
+            stats = norm_stats_dict.get(band, {
+                "median": np.median(band_powers),
+                "mad": np.median(np.abs(band_powers - np.median(band_powers)))
+            })
+            
+        # Ensure MAD is not zero to avoid division by zero
+        if stats["mad"] == 0:
+            stats["mad"] = 1e-6 # Use a small value instead of zero
+            
+        z_scores = [(p - stats["median"]) / stats["mad"] for p in band_powers]
         zscore_maps[band] = z_scores
-    logger.info("Computed z-score maps for all bands.")
     return zscore_maps
 
-def robust_mad(x, constant=1.4826, max_iter=10, tol=1e-3):
-    """
-    Compute median absolute deviation (MAD) iteratively.
-    
-    Args:
-        x (np.array): Input data.
-        constant (float): Scaling constant.
-        max_iter (int): Maximum iterations.
-        tol (float): Convergence tolerance.
-    
-    Returns:
-        tuple: (MAD, median)
-    """
-    x = np.asarray(x)
-    if not x.size:
-        logger.warning("Empty input for MAD computation.")
-        return 0.0, 0.0
-    med = np.median(x)
-    mad = np.median(np.abs(x - med))
-    for _ in range(max_iter):
-        mask = np.abs(x - med) <= 3 * mad
-        new_med = np.median(x[mask])
-        new_mad = np.median(np.abs(x[mask] - new_med))
-        if np.abs(new_med - med) < tol and np.abs(new_mad - mad) < tol:
-            break
-        med, mad = new_med, new_mad
-    mad_val = mad * constant
-    logger.debug(f"Computed MAD: {mad_val:.2f}, Median: {med:.2f}")
-    return mad_val, med
-
-def robust_zscore(x, use_iqr=False):
-    """
-    Compute robust z-scores using MAD or IQR.
-    
-    Args:
-        x (np.array): Input data.
-        use_iqr (bool): Use IQR instead of MAD.
-    
-    Returns:
-        np.array: Z-scores.
-    """
-    x = np.asarray(x)
-    if not x.size:
-        logger.warning("Empty input for robust z-score computation.")
-        return np.array([])
-    med = np.median(x)
-    if use_iqr:
-        q75, q25 = np.percentile(x, [75, 25])
-        iqr = q75 - q25
-        scale = iqr if iqr != 0 else 1.0
-    else:
-        scale, med = robust_mad(x)
-        if scale == 0:
-            scale = 1.0
-    zscores = (x - med) / scale
-    logger.debug(f"Computed robust z-scores: mean={np.mean(zscores):.2f}, std={np.std(zscores):.2f}")
-    return zscores
-
-def compute_bandpower_robust_zscores(raw, bands=None, fmin=1, fmax=40, n_fft=2048, use_iqr=False):
-    """
-    Compute robust z-scores for band powers.
-    
-    Args:
-        raw (mne.io.Raw): Raw EEG data.
-        bands (dict, optional): Frequency bands.
-        fmin (float): Minimum frequency.
-        fmax (float): Maximum frequency.
-        n_fft (int): FFT length.
-        use_iqr (bool): Use IQR instead of MAD.
-    
-    Returns:
-        dict: {band: z-scores}
-    """
-    if raw is None:
-        logger.warning("Cannot compute robust z-scores: No data available.")
-        return {}
-    bands = bands or BANDS
-    psds, freqs = psd_array_welch(raw.get_data(), raw.info['sfreq'], fmin=fmin, fmax=fmax, n_fft=n_fft, verbose=False)
-    psds_db = 10 * np.log10(psds)
-    robust_features = {}
-    for band, (low, high) in bands.items():
-        band_mask = (freqs >= low) & (freqs <= high)
-        if not np.any(band_mask):
-            logger.warning(f"No frequencies in band {band}.")
-            robust_features[band] = np.zeros(psds_db.shape[0])
-            continue
-        band_power = psds_db[:, band_mask].mean(axis=1)
-        robust_features[band] = robust_zscore(band_power, use_iqr=use_iqr)
-    logger.info("Computed robust z-scores for all bands.")
-    return robust_features
-
-def compare_zscores(standard_z, robust_z, clinical_outcomes):
-    """
-    Compare standard and robust z-scores against clinical outcomes.
-    
-    Args:
-        standard_z (dict): Standard z-scores by band.
-        robust_z (dict): Robust z-scores by band.
-        clinical_outcomes (np.array): Clinical outcome values.
-    """
-    for band in standard_z.keys():
-        try:
-            r_std, p_std = pearsonr(standard_z[band], clinical_outcomes)
-            r_rob, p_rob = pearsonr(robust_z[band], clinical_outcomes)
-            logger.info(f"Band {band}:")
-            logger.info(f"  Standard z-score: r = {r_std:.3f}, p = {p_std:.3f}")
-            logger.info(f"  Robust z-score: r = {r_rob:.3f}, p = {p_rob:.3f}")
-        except Exception as e:
-            logger.warning(f"Failed to compare z-scores for band {band}: {e}")
+# ------------------ Advanced Analysis Functions ------------------
 
 def compute_modulation_index(phase_data, amp_data, n_bins=18):
     """
-    Compute modulation index (MI) using KL divergence.
+    Compute a modulation index (MI) using KL divergence.
     
-    Args:
-        phase_data (np.array): Phase signal.
-        amp_data (np.array): Amplitude envelope signal.
-        n_bins (int): Number of bins for phase.
-    
+    Parameters:
+      phase_data (np.array): Phase signal.
+      amp_data (np.array): Amplitude envelope signal.
+      n_bins (int): Number of bins for phase.
+      
     Returns:
-        float: Modulation index.
+      float: Modulation index.
     """
-    if phase_data is None or amp_data is None or not phase_data.size or not amp_data.size:
-        logger.warning("Invalid data for modulation index computation.")
-        return np.nan
-    try:
-        phase = np.angle(hilbert(phase_data))
-        amp_env = np.abs(hilbert(amp_data))
-        bins = np.linspace(-np.pi, np.pi, n_bins + 1)
-        digitized = np.digitize(phase, bins) - 1
-        bin_means = np.array([amp_env[digitized == i].mean() for i in range(n_bins)])
-        bin_prob = bin_means / (bin_means.sum() + 1e-10)
-        uniform_prob = 1.0 / n_bins
-        kl_div = np.sum(bin_prob * np.log((bin_prob + 1e-10) / uniform_prob))
-        max_kl = np.log(n_bins)
-        mi = kl_div / max_kl
-        logger.debug(f"Computed modulation index: {mi:.2f}")
-        return mi
-    except Exception as e:
-        logger.warning(f"Failed to compute modulation index: {e}")
-        return np.nan
+    phase = np.angle(hilbert(phase_data))
+    amp_env = np.abs(hilbert(amp_data))
+    bins = np.linspace(-np.pi, np.pi, n_bins + 1)
+    digitized = np.digitize(phase, bins) - 1
+    bin_means = np.array([amp_env[digitized == i].mean() for i in range(n_bins)])
+    bin_prob = bin_means / (bin_means.sum() + 1e-10)
+    uniform_prob = 1.0 / n_bins
+    kl_div = np.sum(bin_prob * np.log((bin_prob + 1e-10) / uniform_prob))
+    max_kl = np.log(n_bins)
+    return kl_div / max_kl
 
 def run_pac_analysis(data_arr, channels, sfreq, low_freqs, high_freqs, pac_scale_factor, output_dir, condition_name):
     """
     Compute phase-amplitude coupling (PAC) for each channel.
     
-    Args:
-        data_arr (np.array): 2D array (n_channels x n_samples).
-        channels (list): List of channel names.
-        sfreq (float): Sampling frequency.
-        low_freqs (list): List of low-frequency bands (tuples).
-        high_freqs (list): List of high-frequency bands (tuples).
-        pac_scale_factor (float): Scaling factor for PAC values.
-        output_dir (str): Directory to save PAC plots.
-        condition_name (str): Condition label ("EO" or "EC").
-    
+    Parameters:
+      data_arr (np.array): 2D array (n_channels x n_samples).
+      channels (list): List of channel names.
+      sfreq (float): Sampling frequency.
+      low_freqs (list): List of low-frequency bands (tuples).
+      high_freqs (list): List of high-frequency bands (tuples).
+      pac_scale_factor (float): Scaling factor for PAC values.
+      output_dir (str): Directory to save PAC plots.
+      condition_name (str): Condition label ("EO" or "EC").
+      
     Returns:
-        np.array: PAC matrix of shape (n_low, n_high, n_channels).
+      np.array: PAC matrix of shape (n_low, n_high, n_channels).
     """
-    if data_arr is None or not data_arr.size or not channels:
-        logger.warning("Invalid data or channels for PAC analysis.")
-        return np.zeros((len(low_freqs), len(high_freqs), len(channels)))
     n_lf = len(low_freqs)
     n_hf = len(high_freqs)
     n_ch = len(channels)
     pac_matrix = np.zeros((n_lf, n_hf, n_ch))
-    output_dir = Path(output_dir) / OUTPUT_FOLDERS["coherence_eo"] if condition_name == "EO" else Path(output_dir) / OUTPUT_FOLDERS["coherence_ec"]
-    output_dir.mkdir(parents=True, exist_ok=True)
     for i, (lf1, lf2) in enumerate(low_freqs):
         for j, (hf1, hf2) in enumerate(high_freqs):
             for k in range(n_ch):
-                try:
-                    phase_sig = mne.filter.filter_data(data_arr[k], sfreq, lf1, lf2, verbose=False)
-                    amp_sig = mne.filter.filter_data(data_arr[k], sfreq, hf1, hf2, verbose=False)
-                    pac_matrix[i, j, k] = compute_modulation_index(phase_sig, amp_sig)
-                except Exception as e:
-                    logger.warning(f"Failed to compute PAC for channel {channels[k]}, low {lf1}-{lf2}, high {hf1}-{hf2}: {e}")
+                phase_sig = mne.filter.filter_data(data_arr[k], sfreq, lf1, lf2, verbose=False)
+                amp_sig = mne.filter.filter_data(data_arr[k], sfreq, hf1, hf2, verbose=False)
+                pac_matrix[i, j, k] = compute_modulation_index(phase_sig, amp_sig)
     pac_matrix *= pac_scale_factor
     for k, ch in enumerate(channels):
-        try:
-            vals = pac_matrix[:, :, k]
-            fig, ax = plt.subplots(figsize=PLOT_CONFIG["coherence_figsize"], facecolor='black')
-            ax.set_facecolor('black')
-            im = ax.imshow(vals, cmap=PLOT_CONFIG["topomap_cmap"], aspect='auto', interpolation='nearest')
-            ax.set_title(f"PAC Heatmap - {ch} ({condition_name})", color='white', fontsize=10)
-            ax.set_xticks(range(len(high_freqs)))
-            ax.set_xticklabels([f"{hf[0]}-{hf[1]}Hz" for hf in high_freqs], color='white', rotation=45)
-            ax.set_yticks(range(len(low_freqs)))
-            ax.set_yticklabels([f"{lf[0]}-{lf[1]}Hz" for lf in low_freqs], color='white')
-            cbar = plt.colorbar(im, ax=ax)
-            cbar.set_label("PAC", color='white')
-            cbar.ax.tick_params(colors='white')
-            fig.tight_layout()
-            pac_path = output_dir / f"PAC_{ch}_{condition_name}.png"
-            fig.savefig(pac_path, dpi=PLOT_CONFIG["dpi"], facecolor='black')
-            plt.close(fig)
-            logger.info(f"Saved PAC heatmap for {ch} ({condition_name}) to {pac_path}")
-        except Exception as e:
-            logger.warning(f"Failed to save PAC heatmap for {ch} ({condition_name}): {e}")
+        vals = pac_matrix[:, :, k]
+        fig, ax = plt.subplots(figsize=(8, 6), facecolor='black')
+        ax.imshow(vals, cmap='plasma', aspect='auto', interpolation='nearest')
+        ax.set_title(f"PAC Heatmap - {ch} ({condition_name})", color='white', fontsize=10)
+        ax.set_xticks(range(len(high_freqs)))
+        ax.set_xticklabels([f"{hf[0]}-{hf[1]}Hz" for hf in high_freqs], color='white', rotation=45)
+        ax.set_yticks(range(len(low_freqs)))
+        ax.set_yticklabels([f"{lf[0]}-{lf[1]}Hz" for lf in low_freqs], color='white')
+        fig.tight_layout()
+        pac_path = os.path.join(output_dir, f"PAC_{ch}_{condition_name}.png")
+        fig.savefig(pac_path, facecolor='black')
+        plt.close(fig)
     return pac_matrix
-
-def compute_zscore_features(raw_eo, method_choice, norm_stats):
-    """
-    Compute z-score features using standard or robust methods.
-    
-    Args:
-        raw_eo (mne.io.Raw): Eyes-open raw data.
-        method_choice (str): Z-score method ('1', '2', '3', '4').
-        norm_stats (dict): Normative statistics.
-    
-    Returns:
-        tuple: (standard_features, chosen_features)
-    """
-    if raw_eo is None:
-        logger.warning("Cannot compute z-score features: EO data is None.")
-        return {}, {}
-    standard_features = {}
-    psds, freqs = psd_array_welch(raw_eo.get_data(), raw_eo.info['sfreq'], fmin=1, fmax=40, n_fft=2048, verbose=False)
-    psds_db = 10 * np.log10(psds)
-    for band, (low, high) in BANDS.items():
-        band_mask = (freqs >= low) & (freqs <= high)
-        if not np.any(band_mask):
-            logger.warning(f"No frequencies in band {band}.")
-            standard_features[band] = np.zeros(psds_db.shape[0])
-            continue
-        band_power = psds_db[:, band_mask].mean(axis=1)
-        standard_features[band] = zscore(band_power)
-    if method_choice == "1":
-        chosen_features = standard_features
-        logger.info("Using standard z-scores (mean/std).")
-    elif method_choice == "2":
-        chosen_features = compute_bandpower_robust_zscores(raw_eo, bands=BANDS, use_iqr=False)
-        logger.info("Using robust z-scores (MAD-based).")
-    elif method_choice == "3":
-        chosen_features = compute_bandpower_robust_zscores(raw_eo, bands=BANDS, use_iqr=True)
-        logger.info("Using robust z-scores (IQR-based).")
-    elif method_choice == "4":
-        chosen_features = compute_all_zscore_maps(raw_eo, norm_stats, epoch_len_sec=2.0)
-        logger.info("Using published norms for z-score normalization.")
-    else:
-        logger.warning("Invalid choice. Defaulting to standard z-scores.")
-        chosen_features = standard_features
-    logger.info("Computed z-score features.")
-    return standard_features, chosen_features
 
 def compute_coherence_matrix(data, sfreq, band, nperseg):
     """
     Compute a coherence matrix for all channels in a specified frequency band.
     
-    Args:
-        data (np.array): 2D array (n_channels x n_samples).
-        sfreq (float): Sampling frequency.
-        band (tuple): Frequency band.
-        nperseg (int): nperseg parameter for coherence.
-    
+    Parameters:
+      data (np.array): 2D array (n_channels x n_samples).
+      sfreq (float): Sampling frequency.
+      band (tuple): Frequency band.
+      nperseg (int): nperseg parameter for coherence.
+      
     Returns:
-        np.array: Coherence matrix.
+      np.array: Coherence matrix.
     """
-    if data is None or not data.size:
-        logger.warning("Invalid data for coherence matrix computation.")
-        return np.zeros((0, 0))
     n_channels = data.shape[0]
     coh_matrix = np.zeros((n_channels, n_channels))
     for i in range(n_channels):
-        for j in range(i + 1, n_channels):
-            try:
-                f, Cxy = coherence(data[i], data[j], sfreq, nperseg=nperseg)
-                mask = (f >= band[0]) & (f <= band[1])
-                if not np.any(mask):
-                    logger.warning(f"No frequencies in band {band} for coherence.")
-                    continue
-                coh_val = np.mean(Cxy[mask])
-                coh_matrix[i, j] = coh_val
-                coh_matrix[j, i] = coh_val
-            except Exception as e:
-                logger.warning(f"Failed to compute coherence between channels {i} and {j}: {e}")
-    logger.debug("Computed coherence matrix.")
+        for j in range(i+1, n_channels):
+            f, Cxy = coherence(data[i], data[j], sfreq, nperseg=nperseg)
+            mask = (f >= band[0]) & (f <= band[1])
+            coh_val = np.mean(Cxy[mask])
+            coh_matrix[i, j] = coh_val
+            coh_matrix[j, i] = coh_val
     return coh_matrix
+
+def compute_connectivity_coherence(data, sfreq, band, nperseg):
+    """
+    Compute connectivity coherence matrix (wrapper for compute_coherence_matrix).
+    
+    Parameters:
+      data (np.array): 2D array (n_channels x n_samples).
+      sfreq (float): Sampling frequency.
+      band (tuple): Frequency band.
+      nperseg (int): nperseg parameter for coherence.
+      
+    Returns:
+      np.array: Coherence matrix.
+    """
+    return compute_coherence_matrix(data, sfreq, band, nperseg)
+
+# ------------------ Pseudo-ERP Computation ------------------
 
 def compute_pseudo_erp(raw):
     """
     Compute a pseudo-ERP by epoching the raw data using fixed-length events and averaging.
     
-    Args:
-        raw (mne.io.Raw): Raw EEG data.
-    
+    Parameters:
+      raw (mne.io.Raw): Raw EEG data.
+      
     Returns:
-        matplotlib.figure.Figure: Figure displaying the evoked response with dark styling.
+      matplotlib.figure.Figure: Figure displaying the evoked response with dark styling.
     """
-    if raw is None:
-        logger.warning("Cannot compute pseudo-ERP: No data available.")
-        return None
-    try:
-        events = mne.make_fixed_length_events(raw, duration=2.0)
-        epochs = mne.Epochs(raw, events, tmin=-0.1, tmax=0.4, baseline=(None, 0), preload=True, verbose=False)
-        evoked = epochs.average()
-        fig = evoked.plot(spatial_colors=True, show=False)
-        fig.patch.set_facecolor('black')
-        for ax in fig.get_axes():
-            ax.set_facecolor('black')
-            ax.tick_params(colors='white')
-            for label in ax.get_xticklabels() + ax.get_yticklabels():
-                label.set_color('white')
-            leg = ax.get_legend()
-            if leg:
-                for text in leg.get_texts():
-                    text.set_color('white')
-        logger.info("Computed pseudo-ERP.")
-        return fig
-    except Exception as e:
-        logger.warning(f"Failed to compute pseudo-ERP: {e}")
-        return None
+    events = mne.make_fixed_length_events(raw, duration=2.0)
+    epochs = mne.Epochs(raw, events, tmin=-0.1, tmax=0.4, baseline=(None, 0),
+                        preload=True, verbose=False)
+    evoked = epochs.average()
+    fig = evoked.plot(spatial_colors=True, show=False)
+    # Apply dark styling to the figure and its axes:
+    fig.patch.set_facecolor('black')
+    for ax in fig.get_axes():
+         ax.set_facecolor('black')
+         ax.tick_params(colors='white')
+         for label in ax.get_xticklabels() + ax.get_yticklabels():
+              label.set_color('white')
+         leg = ax.get_legend()
+         if leg:
+              for text in leg.get_texts():
+                   text.set_color('white')
+    return fig
+
+# ------------------ Time-Frequency Representation (TFR) ------------------
 
 def compute_tfr(raw, freqs, n_cycles, tmin=0.0, tmax=2.0):
     """
     Compute Time-Frequency Representation (TFR) using Morlet wavelets.
     
-    Args:
-        raw (mne.io.Raw): Raw EEG data.
-        freqs (array-like): Frequencies of interest.
-        n_cycles (array-like or float): Number of cycles.
-        tmin (float): Start time for epochs.
-        tmax (float): End time for epochs.
-    
+    Parameters:
+      raw (mne.io.Raw): Raw EEG data.
+      freqs (array-like): Frequencies of interest.
+      n_cycles (array-like or float): Number of cycles.
+      tmin (float): Start time for epochs.
+      tmax (float): End time for epochs.
+      
     Returns:
-        mne.time_frequency.AverageTFR: The computed TFR.
+      mne.time_frequency.AverageTFR: The computed TFR.
     """
-    if raw is None:
-        logger.warning("Cannot compute TFR: No data available.")
-        return None
+    events = mne.make_fixed_length_events(raw, duration=tmax-tmin)
+    epochs = mne.Epochs(raw, events, tmin=tmin, tmax=tmax, baseline=None, preload=True, verbose=False)
+    tfr = epochs.compute_tfr(method="morlet", freqs=freqs, n_cycles=n_cycles,
+                             decim=3, n_jobs=1, verbose=False)
+    return tfr
+
+def compute_tfr_for_band(raw, band_range, n_cycles, tmin=0.0, tmax=2.0):
+    """
+    Compute a TFR for a given frequency band.
+    Adjusts the epoch window if necessary so that wavelets fit within the signal.
+    
+    Parameters:
+      raw (mne.io.Raw): Raw EEG data.
+      band_range (tuple): Frequency band (fmin, fmax).
+      n_cycles (float or array): Number of cycles.
+      tmin (float): Start time for epochs.
+      tmax (float): End time for epochs.
+      
+    Returns:
+      mne.time_frequency.AverageTFR or None: Averaged TFR, or None on error.
+    """
+    required_duration = n_cycles / band_range[0]
+    actual_duration = tmax - tmin
+    if actual_duration < required_duration:
+        center = (tmax + tmin) / 2.0
+        tmin = center - required_duration / 2.0
+        tmax = center + required_duration / 2.0
+        print(f"Adjusted epoch window to ({tmin:.2f}, {tmax:.2f}) for band {band_range}")
     try:
-        events = mne.make_fixed_length_events(raw, duration=tmax - tmin)
+        events = mne.make_fixed_length_events(raw, duration=tmax-tmin)
         epochs = mne.Epochs(raw, events, tmin=tmin, tmax=tmax, baseline=None, preload=True, verbose=False)
-        tfr = tfr_morlet(epochs, freqs=freqs, n_cycles=n_cycles, return_itc=False, average=True, verbose=False)
-        logger.info("Computed TFR.")
-        return tfr
+        freqs = np.linspace(band_range[0], band_range[1], 10)
+        tfr = epochs.compute_tfr(method="morlet", freqs=freqs, n_cycles=n_cycles,
+                                 decim=3, n_jobs=1, verbose=False)
+        return tfr.average()
     except Exception as e:
-        logger.warning(f"Failed to compute TFR: {e}")
+        print(f"Error computing TFR for band {band_range}: {e}")
         return None
 
-def compute_ica(raw):
+def compute_all_tfr_maps(raw, n_cycles, tmin=0.0, tmax=2.0):
     """
-    Compute Independent Component Analysis (ICA) on raw EEG data.
+    Compute TFR maps for each frequency band.
     
-    Args:
-        raw (mne.io.Raw): Raw EEG data.
-    
+    Parameters:
+      raw (mne.io.Raw): Raw EEG data.
+      n_cycles (float): Number of cycles for TFR.
+      tmin (float): Start time for epochs.
+      tmax (float): End time for epochs.
+      
     Returns:
-        mne.preprocessing.ICA: Fitted ICA object.
+      dict: {band: AverageTFR object or None}
     """
-    if raw is None:
-        logger.warning("Cannot compute ICA: No data available.")
-        return None
+    tfr_maps = {}
+    for band, band_range in BANDS.items():
+        tfr_maps[band] = compute_tfr_for_band(raw, band_range, n_cycles, tmin, tmax)
+    return tfr_maps
+
+# ------------------ ICA Computation ------------------
+
+def compute_ica(raw, n_components=0.95, method='fastica', random_state=42):
+    """
+    Compute ICA on the raw data after applying a high-pass filter at 1 Hz.
+    
+    Parameters:
+      raw (mne.io.Raw): Raw EEG data.
+      n_components (float or int): Number of components.
+      method (str): ICA method.
+      random_state (int): Random seed.
+      
+    Returns:
+      mne.preprocessing.ICA: Fitted ICA object.
+    """
+    raw_copy = raw.copy().filter(l_freq=1, h_freq=None, verbose=False)
+    ica = mne.preprocessing.ICA(n_components=n_components, method=method, random_state=random_state, verbose=False)
+    ica.fit(raw_copy, verbose=False)
+    return ica
+
+# ------------------ Source Localization Functions ------------------
+
+def compute_inverse_operator(raw, fwd, cov, loose=0.2, depth=0.8):
+    """
+    Compute the inverse operator using the forward solution and noise covariance.
+    
+    Parameters:
+      raw (mne.io.Raw): Raw EEG data.
+      fwd (mne.Forward): Forward solution.
+      cov (mne.Covariance): Noise covariance.
+      loose (float): Loose orientation parameter.
+      depth (float): Depth weighting parameter.
+      
+    Returns:
+      mne.minimum_norm.InverseOperator: The computed inverse operator.
+    """
+    inv_op = mne.minimum_norm.make_inverse_operator(raw.info, fwd, cov,
+                                                    loose=loose, depth=depth, verbose=False)
+    return inv_op
+
+def compute_source_localization(evoked, inv_op, lambda2=1.0/9.0, method="sLORETA"):
+    """
+    Compute the source localization (source estimate) from the evoked response.
+    
+    Parameters:
+      evoked (mne.Evoked): Evoked response.
+      inv_op (mne.minimum_norm.InverseOperator): Inverse operator.
+      lambda2 (float): Regularization parameter.
+      method (str): Inverse solution method (e.g., "sLORETA", "MNE" for LORETA).
+      
+    Returns:
+      mne.SourceEstimate: The source estimate.
+    """
     try:
-        ica = mne.preprocessing.ICA(n_components=15, random_state=97, max_iter=800, verbose=False)
-        ica.fit(raw)
-        logger.info("Computed ICA.")
-        return ica
+         stc = mne.minimum_norm.apply_inverse(evoked, inv_op, lambda2=lambda2, method=method, pick_ori=None, verbose=False)
+         return stc
     except Exception as e:
-        logger.warning(f"Failed to compute ICA: {e}")
-        return None
+         logger.error(f"Error applying inverse solution with method {method}: {e}")
+         return None
+
+# --- Moved Helper from main.py ---
+def compute_source_for_band(cond, raw_data, inv_op, band, folders, source_methods, subjects_dir):
+    """Computes and saves source estimates for a specific band.
+
+    Called in parallel by run_source_localization_analysis.
+    Needs access to BANDS, compute_source_localization, plotting.plot_source_estimate.
+
+    Returns:
+        list[tuple[str, str, str, str]]: List of (cond, band, method, rel_filename)
+    """
+    results_for_band = []
+    try:
+        logger.info(f"    Computing sources for: {cond} - {band}")
+        band_range = BANDS[band]
+        raw_band = raw_data.copy().filter(band_range[0], band_range[1], verbose=False)
+        events = mne.make_fixed_length_events(raw_band, duration=2.0)
+        if len(events) < 1:
+             logging.warning(f"    Skipping {cond}-{band}: Not enough events after filtering.")
+             return []
+        epochs = mne.Epochs(raw_band, events, tmin=-0.1, tmax=0.4, baseline=(None, 0), preload=True, verbose=False)
+        if len(epochs) < 1:
+            logging.warning(f"    Skipping {cond}-{band}: No valid epochs created.")
+            return []
+        evoked = epochs.average()
+
+        subject_folder = Path(folders["subject"]) 
+        cond_folder = Path(folders["plots_src"]) / cond 
+        cond_folder.mkdir(parents=True, exist_ok=True)
+
+        for method, method_label in source_methods.items():
+            try:
+                stc = compute_source_localization(evoked, inv_op, method=method_label) 
+                if stc is None: 
+                     logger.warning(f"    STC computation failed for {cond}-{band}-{method}. Skipping plot.")
+                     continue
+
+                try:
+                     fig_src = plotting.plot_source_estimate(stc, view="lateral", time_point=0.1, subjects_dir=subjects_dir)
+                     if fig_src:
+                          src_filename = f"source_{cond}_{method}_{band}.png"
+                          src_path = cond_folder / src_filename
+                          fig_src.savefig(str(src_path), dpi=150, facecolor='black') 
+                          plt.close(fig_src)
+                          rel_path = str(src_path.relative_to(subject_folder))
+                          results_for_band.append((cond, band, method, rel_path))
+                     else:
+                          logger.warning(f"    Plotting failed for {cond}-{band}-{method}, no figure returned.")
+                          
+                except Exception as plot_e:
+                     logger.error(f"    Error plotting source for {cond}-{band}-{method}: {plot_e}", exc_info=True)
+                     if 'fig_src' in locals() and isinstance(fig_src, plt.Figure):
+                          plt.close(fig_src)
+
+            except Exception as compute_e:
+                logger.error(f"    Error computing source localization for {cond}-{band} with {method}: {compute_e}", exc_info=True)
+
+    except Exception as band_e:
+         logger.error(f"    Error processing band {band} for {cond} in source localization: {band_e}", exc_info=True)
+
+    return results_for_band
+
+# --- New Orchestration Function --- 
+def run_source_localization_analysis(raw_eo, raw_ec, folders, band_list, num_workers=None) -> dict:
+    """Orchestrates source localization analysis.
+
+    Sets up necessary MNE components (fsaverage, BEM, forward, inverse)
+    and runs source computation for each band in parallel.
+
+    Args:
+        raw_eo (mne.io.Raw | None): Eyes open data.
+        raw_ec (mne.io.Raw | None): Eyes closed data.
+        folders (dict): Dictionary of output folder paths (must include 'subject' and 'plots_src').
+        band_list (list[str]): List of frequency band names to analyze.
+        num_workers (int, optional): Number of workers for parallel processing. Defaults to cpu count.
+
+    Returns:
+        dict: Dictionary containing relative paths to the generated source plot images,
+              structured as {condition: {band: {method: rel_path}}}.
+    """
+    logger.info("--- Starting Source Localization Analysis ---")
+    source_loc_start_time = time.time()
+    source_localization_results = {"EO": {}, "EC": {}}
+    source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eLORETA"}
+    n_workers = num_workers if num_workers else mp.cpu_count()
+
+    if raw_eo is None and raw_ec is None:
+        logger.warning("  Skipping source localization: No EO or EC data available.")
+        return source_localization_results
+
+    subjects_dir, src, bem_solution = None, None, None
+    fwd_eo, fwd_ec = None, None
+    inv_op_eo, inv_op_ec = None, None
+    cov_common = None
+    setup_successful = True
+
+    try:
+        logger.info("  Fetching fsaverage data...")
+        fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+        subjects_dir = os.path.dirname(fs_dir)
+        subject_fs = "fsaverage"
+
+        logger.info("  Setting up source space...")
+        src = mne.setup_source_space(subject_fs, spacing="oct6", subjects_dir=subjects_dir, add_dist=False, verbose=False)
+        logger.info("  Setting up BEM model...")
+        conductivity = (0.3, 0.006, 0.3)
+        bem_model = mne.make_bem_model(subject=subject_fs, ico=4, conductivity=conductivity, subjects_dir=subjects_dir, verbose=False)
+        bem_solution = mne.make_bem_solution(bem_model, verbose=False)
+
+        if raw_eo:
+            logger.info("  Computing covariance from EO data...")
+            events_eo = mne.make_fixed_length_events(raw_eo, duration=2.0)
+            epochs_eo = mne.Epochs(raw_eo, events_eo, tmin=-0.1, tmax=0.4, baseline=(None, 0), preload=True, verbose=False)
+            cov_common = mne.compute_covariance(epochs_eo, tmax=0., method="empirical", verbose=False)
+
+        if raw_eo:
+            logger.info("  Preparing EO forward solution...")
+            fwd_eo = mne.make_forward_solution(raw_eo.info, trans="fsaverage", src=src, bem=bem_solution, eeg=True, meg=False, verbose=False)
+        if raw_ec:
+            logger.info("  Preparing EC forward solution...")
+            fwd_ec = mne.make_forward_solution(raw_ec.info, trans="fsaverage", src=src, bem=bem_solution, eeg=True, meg=False, verbose=False)
+
+        if raw_eo and fwd_eo and cov_common:
+            logger.info("  Preparing EO inverse operator...")
+            inv_op_eo = compute_inverse_operator(raw_eo, fwd_eo, cov_common)
+        if raw_ec and fwd_ec:
+            if cov_common:
+                logger.info("  Preparing EC inverse operator (using EO covariance)...")
+                inv_op_ec = compute_inverse_operator(raw_ec, fwd_ec, cov_common)
+            else:
+                logger.warning("  Cannot prepare EC inverse operator: No suitable covariance available.")
+
+    except Exception as e_setup:
+        logger.error(f"  ❌ Error during MNE setup for source localization: {e_setup}", exc_info=True)
+        setup_successful = False
+
+    if not setup_successful:
+         logger.warning("Skipping source localization due to setup errors.")
+         return source_localization_results
+
+    tasks = []
+    result_keys = []
+    logger.info("  Preparing parallel source computation tasks...")
+    for cond, raw_data, inv_op in [("EO", raw_eo, inv_op_eo), ("EC", raw_ec, inv_op_ec)]:
+        if raw_data is None or inv_op is None:
+            logger.info(f"  Skipping source computation for {cond}: Missing data or inverse operator.")
+            continue
+        for band in band_list:
+            args = (cond, raw_data, inv_op, band, folders, source_methods, subjects_dir)
+            tasks.append((compute_source_for_band, args, f"source_{cond}_{band}"))
+
+    if not tasks:
+         logger.warning("  No source computation tasks defined after setup.")
+         return source_localization_results
+
+    logger.info(f"  🚀 Starting {len(tasks)} parallel source computation tasks using {n_workers} workers...")
+    parallel_start_time = time.time()
+    computed_results_list = []
+    try:
+        with mp.Pool(processes=n_workers) as pool:
+            async_results_src = []
+            temp_result_keys_src = []
+
+            for func, args, key in tasks:
+                temp_result_keys_src.append(key)
+                res = pool.apply_async(execute_task, args=(func, args))
+                async_results_src.append(res)
+            
+            pool.close()
+            
+            timeout_seconds_src = 600
+            for i, res in enumerate(async_results_src):
+                key = temp_result_keys_src[i]
+                try:
+                    result_list = res.get(timeout=timeout_seconds_src)
+                    if result_list is not None:
+                        computed_results_list.extend(result_list)
+                        logger.info(f"    ✅ Task '{key}' completed.")
+                    else:
+                         logger.warning(f"    ⚠️ Task '{key}' failed (returned None). Check logs.")
+                except mp.TimeoutError:
+                    logger.error(f"    ❌ Task '{key}' timed out after {timeout_seconds_src}s.")
+                except Exception as e:
+                    logger.error(f"    ❌ Task '{key}' failed with error: {e}", exc_info=True)
+            
+            pool.join()
+            
+    except Exception as pool_e_src:
+        logger.error(f"Source localization multiprocessing pool error: {pool_e_src}", exc_info=True)
+
+    parallel_end_time = time.time()
+    logger.info(f"  Source computation finished in {parallel_end_time - parallel_start_time:.2f}s")
+
+    for cond, band, method, rel_filename in computed_results_list:
+        if cond not in source_localization_results:
+             source_localization_results[cond] = {}
+        if band not in source_localization_results[cond]:
+             source_localization_results[cond][band] = {}
+        source_localization_results[cond][band][method] = rel_filename
+
+    source_loc_end_time = time.time()
+    logger.info(f"--- Source Localization Analysis finished in {source_loc_end_time - source_loc_start_time:.2f}s ---")
+
+    return source_localization_results
