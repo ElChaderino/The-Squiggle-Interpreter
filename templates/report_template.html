@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <base href="../">
   <title>Interactive EEG Report</title>
   <style>
     /* Dark mode styling */
@@ -53,38 +54,12 @@
       border-bottom: 2px solid #555;
       padding-bottom: 10px;
     }
-    table {
-      margin: 20px auto;
-      border-collapse: collapse;
-      background-color: #333;
-    }
-    th, td {
-      padding: 8px;
-      border: 1px solid #555;
-    }
-    th {
-      background-color: #444;
-    }
   </style>
 
   <script>
-    // ---------------------------
-    // 1) DATA FROM PYTHON
-    // ---------------------------
-    var globalTopomaps     = {{ global_topomaps | tojson }};
-    var globalWaveforms    = {{ global_waveforms | tojson }};
-    var coherence          = {{ coherence | tojson }};
-    var globalERP          = {{ global_erp | tojson }};
-    var zscore             = {{ zscore | tojson }};
-    var variance           = {{ variance | tojson }};
-    var tfr                = {{ tfr | tojson }};
-    var ica                = {{ ica | tojson }};
-    var sourceLocalization = {{ source_localization | tojson }};
-    var hypnograms         = {{ hypnograms | tojson }};
-
-    var siteList = {{ site_list | tojson }};
-    var bandList = {{ band_list | tojson }};
-    var siteDict = {{ site_dict | tojson }};
+    // Global variables to hold parsed data
+    var topomaps, waveforms, coherence, erp, zscore, zscores, variance, tfr, ica, sourceLocalization, hypnograms, strips;
+    var siteList, bandList, siteDict, phenotype;
 
     // ---------------------------
     // 2) PATHS PASSED FROM PYTHON
@@ -122,24 +97,31 @@
       updateGlobalTopo();
     }
     function updateGlobalTopo() {
+      console.log("topomaps:", topomaps, "cond:", cond, "band:", band);
       var cond = document.getElementById("globalTopoCond").value;
       var band = document.getElementById("globalTopoSelect").value;
-      var imgName = globalTopomaps[cond][band];
-      document.getElementById("globalTopoImg").src = topomapsPath + "/" + cond + "/" + imgName;
+      var imgName = topomaps[cond][band];
+      document.getElementById("globalTopoImg").src = imgName;
     }
 
     // ---------------------------
     // GLOBAL WAVEFORMS
     // ---------------------------
     function populateGlobalWaveDropdowns() {
-      var waveBands = Object.keys(globalWaveforms);
+      var waveBands = (waveforms && waveforms["EO"]) ? Object.keys(waveforms["EO"]) : ((waveforms && waveforms["EC"]) ? Object.keys(waveforms["EC"]) : []);
+      populateDropdown("globalWaveCond", ["EO", "EC"]);
       populateDropdown("globalWaveSelect", waveBands);
       updateGlobalWave();
     }
     function updateGlobalWave() {
+      var cond = document.getElementById("globalWaveCond").value;
       var band = document.getElementById("globalWaveSelect").value;
-      var imgName = globalWaveforms[band];
-      document.getElementById("globalWaveImg").src = waveformsPath + "/EO/" + imgName;
+      if (waveforms[cond] && waveforms[cond][band]) {
+        var imgName = waveforms[cond][band];
+        document.getElementById("globalWaveImg").src = imgName;
+      } else {
+        document.getElementById("globalWaveImg").src = "";
+      }
     }
 
     // ---------------------------
@@ -156,7 +138,7 @@
       var band = document.getElementById("globalCohSelect").value;
       if (coherence[cond] && coherence[cond][band]) {
         var imgName = coherence[cond][band];
-        document.getElementById("globalCohImg").src = coherencePath + "/" + cond + "/" + imgName;
+        document.getElementById("globalCohImg").src = imgName;
       } else {
         document.getElementById("globalCohImg").src = "";
       }
@@ -171,27 +153,39 @@
     }
     function updateGlobalERP() {
       var cond = document.getElementById("globalERPCond").value;
-      var imgName = globalERP[cond];
-      document.getElementById("erpImg").src = erpPath + "/" + imgName;
+      var imgName = erp[cond];
+      document.getElementById("erpImg").src = imgName;
     }
 
     // ---------------------------
     // Z-SCORE MAPS
     // ---------------------------
     function populateZscoreDropdowns() {
-      populateDropdown("zscoreCond", ["EO", "EC"]);
-      populateDropdown("zscoreBand", bandList);
+      // Only include conditions with available z-score images
+      var conds = Object.keys(zscores).filter(cond => {
+        return Object.values(zscores[cond] || {}).some(path => path);
+      });
+      populateDropdown("zscoreCond", conds);
+      // Populate bands for the first available condition
+      var initCond = conds.length > 0 ? conds[0] : null;
+      var bands = initCond && zscores[initCond]
+                  ? Object.keys(zscores[initCond]).filter(b => zscores[initCond][b])
+                  : [];
+      populateDropdown("zscoreBand", bands);
       updateZscoreImage();
+      // Update bands when condition changes
+      document.getElementById("zscoreCond").addEventListener('change', function() {
+        var cond = this.value;
+        var bs = Object.keys(zscores[cond] || {}).filter(b => zscores[cond][b]);
+        populateDropdown("zscoreBand", bs);
+        updateZscoreImage();
+      });
     }
     function updateZscoreImage() {
       var cond = document.getElementById("zscoreCond").value;
       var band = document.getElementById("zscoreBand").value;
-      if (zscore[cond] && zscore[cond][band]) {
-        var imgName = zscore[cond][band];
-        document.getElementById("zscoreImg").src = "zscore/" + cond + "/" + imgName;
-      } else {
-        document.getElementById("zscoreImg").src = "";
-      }
+      var imgPath = (zscores[cond] && zscores[cond][band]) ? zscores[cond][band] : "";
+      document.getElementById("zscoreImg").src = imgPath;
     }
 
     // ---------------------------
@@ -205,9 +199,12 @@
     function updateVarianceImage() {
       var cond = document.getElementById("varianceCond").value;
       var band = document.getElementById("varianceBand").value;
-      var capitalizedBand = band.charAt(0).toUpperCase() + band.slice(1);
-      var imgName = "topomap_" + capitalizedBand + "_" + cond + ".png";
-      document.getElementById("varianceImg").src = variancePath + "/" + imgName;
+      if (variance[cond] && variance[cond][band]) {
+        var imgName = variance[cond][band];
+        document.getElementById("varianceImg").src = imgName;
+      } else {
+        document.getElementById("varianceImg").src = "";
+      }
     }
 
     // ---------------------------
@@ -223,7 +220,7 @@
       var band = document.getElementById("tfrBand").value;
       if (tfr[cond] && tfr[cond][band]) {
         var imgName = tfr[cond][band];
-        document.getElementById("tfrImg").src = tfrPath + "/" + cond + "/" + imgName;
+        document.getElementById("tfrImg").src = imgName;
       } else {
         document.getElementById("tfrImg").src = "";
       }
@@ -234,13 +231,16 @@
     // ---------------------------
     function populateIcaDropdowns() {
       populateDropdown("icaCond", ["EO", "EC"]);
+      populateDropdown("icaType", ["components", "properties"]);
       updateIcaImage();
     }
     function updateIcaImage() {
       var cond = document.getElementById("icaCond").value;
-      if (ica[cond]) {
-        var imgName = ica[cond];
-        document.getElementById("icaImg").src = icaPath + "/" + cond + "/" + imgName;
+      var type = document.getElementById("icaType").value;
+
+      if (ica[cond] && ica[cond][type]) {
+        var imgName = ica[cond][type];
+        document.getElementById("icaImg").src = imgName;
       } else {
         document.getElementById("icaImg").src = "";
       }
@@ -262,12 +262,9 @@
       var method = document.getElementById("sourceMethod").value;
       if (sourceLocalization[cond] && sourceLocalization[cond][band] && sourceLocalization[cond][band][method]) {
         var imgName = sourceLocalization[cond][band][method];
-        var fullPath = sourcePath + "/" + imgName;
-        console.log("Source Localization Image URL:", fullPath);
-        document.getElementById("sourceImg").src = fullPath;
+        document.getElementById("sourceImg").src = imgName;
       } else {
         document.getElementById("sourceImg").src = "";
-        console.log("No source localization image found for", cond, band, method);
       }
     }
 
@@ -306,46 +303,40 @@
     // PER-SITE HYPNOGRAMS
     // ---------------------------
     function populateHypnogramDropdowns() {
-      console.log("Populating hypnogram dropdowns with hardcoded sites: ['O1', 'O2', 'PZ']");
-      populateDropdown("hypnogramSite", ["O1", "O2", "PZ"]); // Hardcode the sites
-      populateDropdown("hypnogramCond", ["EO", "EC", "EO_CSD", "EC_CSD"]);
+      // Only include conditions with hypnogram images
+      var conds = Object.keys(hypnograms).filter(cond => {
+        return siteList.some(site => hypnograms[cond] && hypnograms[cond][site]);
+      });
+      populateDropdown("hypnogramCond", conds);
+      populateDropdown("hypnogramSite", siteList);
       updateHypnogramImage();
+      document.getElementById("hypnogramCond").addEventListener('change', updateHypnogramImage);
     }
     function updateHypnogramImage() {
       var site = document.getElementById("hypnogramSite").value;
       var cond = document.getElementById("hypnogramCond").value;
-      console.log("Updating hypnogram image. Condition:", cond, "Site:", site);
-      var imgName = "vigilance_hypnogram_" + cond + "_" + site + ".png";
-      console.log("Loading hypnogram image: " + imgName);
-      var imgElement = document.getElementById("hypnogramImg");
-      imgElement.src = imgName;
-      imgElement.onerror = function() {
-        console.error("Failed to load hypnogram image: " + imgName);
-        imgElement.src = "";
-      };
+      var imgPath = (hypnograms[cond] && hypnograms[cond][site]) ? hypnograms[cond][site] : "";
+      document.getElementById("hypnogramImg").src = imgPath;
     }
 
     // ---------------------------
     // PER-SITE STRIP CHARTS
     // ---------------------------
     function populateStripChartDropdowns() {
-      console.log("Populating strip chart dropdowns with hardcoded sites: ['O1', 'O2', 'PZ']");
-      populateDropdown("stripChartSite", ["O1", "O2", "PZ"]); // Hardcode the sites
-      populateDropdown("stripChartCond", ["EO", "EC", "EO_CSD", "EC_CSD"]);
+      // Only include conditions with strip chart images
+      var conds = Object.keys(strips).filter(cond => {
+        return siteList.some(site => strips[cond] && strips[cond][site]);
+      });
+      populateDropdown("stripChartCond", conds);
+      populateDropdown("stripChartSite", siteList);
       updateStripChartImage();
+      document.getElementById("stripChartCond").addEventListener('change', updateStripChartImage);
     }
     function updateStripChartImage() {
       var site = document.getElementById("stripChartSite").value;
       var cond = document.getElementById("stripChartCond").value;
-      console.log("Updating strip chart image. Condition:", cond, "Site:", site);
-      var imgName = "vigilance_strip_" + cond + "_" + site + ".png";
-      console.log("Loading strip chart image: " + imgName);
-      var imgElement = document.getElementById("stripChartImg");
-      imgElement.src = imgName;
-      imgElement.onerror = function() {
-        console.error("Failed to load strip chart image: " + imgName);
-        imgElement.src = "";
-      };
+      var imgPath = (strips[cond] && strips[cond][site]) ? strips[cond][site] : "";
+      document.getElementById("stripChartImg").src = imgPath;
     }
 
     // ---------------------------
@@ -353,6 +344,7 @@
     // ---------------------------
     window.onload = function() {
       console.log("Site list from Python:", siteList);
+      loadDataFromAttributes(); // Load data first
       populateGlobalTopomapDropdowns();
       populateGlobalWaveDropdowns();
       populateGlobalCohDropdowns();
@@ -365,11 +357,113 @@
       populateSiteDropdowns();
       populateHypnogramDropdowns();
       populateStripChartDropdowns();
+      displayPhenotype();
     };
+
+    function displayPhenotype() {
+      const pheno = JSON.stringify(phenotype, null, 2);
+      document.getElementById("phenotypeDisplay").innerText = pheno || "No phenotype data found.";
+    }
+
+    // Add site_dict handling (Example: Update a display area)
+    function updateSiteInfo() {
+        var siteSelect = document.getElementById('siteSelect'); // Assuming you have a dropdown with id 'siteSelect'
+        if (!siteSelect) return; // Exit if dropdown doesn't exist
+        var selectedSite = siteSelect.value;
+        var infoArea = document.getElementById('siteInfoDisplay'); // Assuming you have a div with id 'siteInfoDisplay'
+        if (!infoArea) return; // Exit if display area doesn't exist
+
+        if (siteDict && siteDict[selectedSite]) {
+            // Format the site information for display
+            var siteInfo = siteDict[selectedSite];
+            var displayText = `<strong>${selectedSite} Info:</strong><br>`;
+            for (var key in siteInfo) {
+                displayText += `${key}: ${siteInfo[key]}<br>`;
+            }
+            infoArea.innerHTML = displayText;
+        } else {
+            infoArea.innerHTML = 'No additional info available for this site.';
+        }
+    }
+
+    // Ensure site dropdown is populated if siteList exists
+    function populateSiteDropdown() {
+        if (siteList && siteList.length > 0) {
+            populateDropdown('siteSelect', siteList); // Assuming 'siteSelect' is the ID of your site dropdown
+             // Add event listener to update info when selection changes
+            var siteSelectElement = document.getElementById('siteSelect');
+            if (siteSelectElement) {
+                siteSelectElement.addEventListener('change', updateSiteInfo);
+                // Initial update
+                updateSiteInfo();
+            }
+        } else {
+            // Optionally hide or disable site selection if siteList is empty
+            var siteContainer = document.getElementById('siteSelectionContainer'); // Assuming a container div
+            if (siteContainer) siteContainer.style.display = 'none';
+        }
+    }
+
+    // Function to load data from data attributes
+    function loadDataFromAttributes() {
+        var dataElement = document.getElementById('report-data');
+        if (!dataElement) {
+            console.error("Data container element not found!");
+            return;
+        }
+        try {
+            topomaps           = JSON.parse(dataElement.dataset.topomaps);
+            waveforms          = JSON.parse(dataElement.dataset.waveforms);
+            coherence          = JSON.parse(dataElement.dataset.coherence);
+            erp                = JSON.parse(dataElement.dataset.erp);
+            zscore             = JSON.parse(dataElement.dataset.zscore);
+            zscores            = JSON.parse(dataElement.dataset.zscores);
+            variance           = JSON.parse(dataElement.dataset.variance);
+            tfr                = JSON.parse(dataElement.dataset.tfr);
+            ica                = JSON.parse(dataElement.dataset.ica);
+            sourceLocalization = JSON.parse(dataElement.dataset.sourcelocalization);
+            hypnograms         = JSON.parse(dataElement.dataset.hypnograms);
+            strips             = JSON.parse(dataElement.dataset.strips);
+            siteList           = JSON.parse(dataElement.dataset.sitelist);
+            bandList           = JSON.parse(dataElement.dataset.bandlist);
+            siteDict           = JSON.parse(dataElement.dataset.sitedict);
+            phenotype          = JSON.parse(dataElement.dataset.phenotype);
+            console.log("Data successfully loaded from attributes.");
+        } catch (e) {
+            console.error("Error parsing data from attributes:", e);
+            // Initialize with defaults to prevent further errors
+            topomaps = {}; waveforms = {}; coherence = {}; erp = {}; zscore = {}; zscores = {}; variance = {}; tfr = {}; ica = {}; sourceLocalization = {}; hypnograms = {}; strips = {};
+            siteList = []; bandList = []; siteDict = {}; phenotype = {};
+        }
+    }
   </script>
 </head>
 <body>
-  <h1>Interactive EEG Report</h1>
+  <!-- Data Container -->
+  <div id="report-data"
+       data-topomaps='{{ topomaps | default({}) | tojson }}'
+       data-waveforms='{{ waveforms | default({}) | tojson }}'
+       data-coherence='{{ coherence | default({}) | tojson }}'
+       data-erp='{{ erp | default({}) | tojson }}'
+       data-zscore='{{ zscore | default({}) | tojson }}'
+       data-zscores='{{ zscores | default({}) | tojson }}'
+       data-variance='{{ variance | default({}) | tojson }}'
+       data-tfr='{{ tfr | default({}) | tojson }}'
+       data-ica='{{ ica | default({}) | tojson }}'
+       data-sourcelocalization='{{ source_localization | default({}) | tojson }}'
+       data-hypnograms='{{ hypnograms | default({}) | tojson }}'
+       data-strips='{{ strips | default({}) | tojson }}'
+       data-sitelist='{{ site_list | default([]) | tojson }}'
+       data-bandlist='{{ band_list | default([]) | tojson }}'
+       data-sitedict='{{ site_dict | default({}) | tojson }}'
+       data-phenotype='{{ phenotype | default({}) | tojson }}'
+       style="display: none;"
+  >
+  </div>
+
+  <h1>Interactive EEG Report for Subject {{ subject_id }}</h1>
+
+  <hr>
 
   <!-- Global Topomaps Section -->
   <div class="container">
@@ -385,6 +479,8 @@
   <!-- Global Waveforms Section -->
   <div class="container">
     <h2>Global Waveforms</h2>
+    <label for="globalWaveCond">Condition:</label>
+    <select id="globalWaveCond" onchange="updateGlobalWave()"></select>
     <label for="globalWaveSelect">Band:</label>
     <select id="globalWaveSelect" onchange="updateGlobalWave()"></select>
     <br>
@@ -449,6 +545,8 @@
     <h2 class="section-title">ICA Components</h2>
     <label for="icaCond">Condition:</label>
     <select id="icaCond" onchange="updateIcaImage()"></select>
+    <label for="icaType">Type:</label>
+    <select id="icaType" onchange="updateIcaImage()"></select>
     <br>
     <img id="icaImg" src="" alt="ICA Components">
   </div>
@@ -515,7 +613,7 @@
   <!-- Phenotype Classification Section -->
   <div class="container">
     <h2 class="section-title">Phenotype Classification</h2>
-    {{ phenotype_html | safe }}
+    <pre id="phenotypeDisplay" style="text-align: left; background-color: #111; padding: 15px; border: 1px solid #555;"></pre>
   </div>
 
 </body>
