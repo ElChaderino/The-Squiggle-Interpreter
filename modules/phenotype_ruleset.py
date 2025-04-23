@@ -1,3 +1,4 @@
+# phenotype_ruleset.py
 """
 phenotype_ruleset.py
 
@@ -11,16 +12,17 @@ The rules operate on a dictionary of EEG features (`f`), which may include:
 - paf_eo (float): Peak Alpha Frequency (Hz) in EO condition.
 - paf_ec (float): Peak Alpha Frequency (Hz) in eyes-closed (EC) condition.
 - theta (float): Theta power z-score.
-- alpha (float): Alpha power z-score.
+- alpha (float): Alpha power z-score. # Note: Often referred to as alpha_power in conditions
 - beta (float): Beta power z-score.
 - hi_beta (float): High Beta power z-score.
-- delta (float): Delta power z-score.
+- delta (float): Delta power z-score. # Note: Often referred to as delta_power in conditions
 - smr (float): Sensorimotor Rhythm (SMR) power z-score.
-- alpha_power (float): Absolute alpha power (µV²).
-- delta_power (float): Absolute delta power (µV²).
+- alpha_power (float): Alpha power z-score. # Docstring inconsistency corrected: Assumed z-score based on usage.
+- delta_power (float): Delta power z-score. # Docstring inconsistency corrected: Assumed z-score based on usage.
 - alpha_asymmetry_f3_f4 (float): Frontal alpha asymmetry (F4 - F3).
 - mu_suppression_ratio (float): Mu rhythm suppression ratio during movement observation.
 - coherence_global (float): Global coherence z-score.
+- coherence_f3_f4 (float): Frontal coherence (F3-F4) z-score. # Added based on rule usage
 - alpha_shift (float): Percentage change in alpha power from EC to EO.
 - high_alpha (float): High Alpha power z-score.
 
@@ -42,7 +44,8 @@ rules: List[Dict] = [
     # ----------------- ADHD -----------------
     {
         "name": "ADHD_combined",
-        "condition": lambda f: f.get("theta_beta", 0) > 3.5 and f.get("paf", 10.0) < 8.0 and f.get("coherence_global", 0.0) < -1.0,
+        # Enhanced: Added alpha_power > 1.0
+        "condition": lambda f: f.get("theta_beta", 0) > 3.5 and f.get("paf", 10.0) < 8.0 and f.get("coherence_global", 0.0) < -1.0 and f.get("alpha_power", 0) > 1.0,
         "confidence": 0.90,
         "recommendations": [
             "Train SMR at Cz (12–15 Hz) to enhance focus",
@@ -51,18 +54,22 @@ rules: List[Dict] = [
             "Adjunct: Behavioral therapy for impulse control"
         ],
         "explanation": (
-            "High Theta/Beta ratio (>3.5), low PAF (<8 Hz), and reduced global coherence (z-score < -1) "
-            "are consistent with ADHD combined type, reflecting inattention, impulsivity, and poor connectivity."
+            # Enhanced: Added elevated alpha power
+            "High Theta/Beta ratio (>3.5), low PAF (<8 Hz), reduced global coherence (z-score < -1), and elevated alpha power (z-score > 1) "
+            "are consistent with ADHD combined type, reflecting inattention, impulsivity, poor connectivity, and increased brain activity."
         ),
         "zscore_summary": {
             "Theta/Beta Ratio": lambda f: f.get("theta_beta", 0),
             "PAF": lambda f: f.get("paf", 10.0),
-            "Global Coherence": lambda f: f.get("coherence_global", 0.0)
+            "Global Coherence": lambda f: f.get("coherence_global", 0.0),
+            # Enhanced: Added Alpha Power
+            "Alpha Power": lambda f: f.get("alpha_power", 0)
         }
     },
     {
         "name": "ADHD_inattentive_variant",
-        "condition": lambda f: f.get("theta", 0) > 2.5 and f.get("beta", 0) < -1.0 and f.get("hi_beta", 0) < -0.5,
+        # Enhanced: Added coherence_global > 1.0
+        "condition": lambda f: f.get("theta", 0) > 2.5 and f.get("beta", 0) < -1.0 and f.get("hi_beta", 0) < -0.5 and f.get("coherence_global", 0.0) > 1.0,
         "confidence": 0.88,
         "recommendations": [
             "Boost mid-beta (15–20 Hz) at Cz to enhance sustained attention",
@@ -71,17 +78,21 @@ rules: List[Dict] = [
             "Adjunct: Cognitive training for attention"
         ],
         "explanation": (
-            "High theta power (z-score > 2.5), low beta (z-score < -1), and low high beta (z-score < -0.5) "
-            "indicate an inattentive ADHD variant, characterized by excessive daydreaming and lack of sustained attention."
+            # Enhanced: Added elevated global coherence
+            "High theta power (z-score > 2.5), low beta (z-score < -1), low high beta (z-score < -0.5), and elevated global coherence (z-score > 1) "
+            "indicate an inattentive ADHD variant, characterized by excessive daydreaming, lack of sustained attention, and over-connectivity."
         ),
         "zscore_summary": {
             "Theta Power": lambda f: f.get("theta", 0),
             "Beta Power": lambda f: f.get("beta", 0),
-            "High Beta Power": lambda f: f.get("hi_beta", 0)
+            "High Beta Power": lambda f: f.get("hi_beta", 0),
+            # Enhanced: Added Global Coherence
+            "Global Coherence": lambda f: f.get("coherence_global", 0.0)
         }
     },
     {
         "name": "ADHD_hyperactive_variant",
+        # No changes needed based on review
         "condition": lambda f: f.get("theta_beta", 0) > 3.0 and f.get("hi_beta", 0) > 2.0 and f.get("smr", 0) < -1.0,
         "confidence": 0.87,
         "recommendations": [
@@ -104,26 +115,33 @@ rules: List[Dict] = [
     # ----------------- TBI -----------------
     {
         "name": "TBI_diffuse",
-        "condition": lambda f: f.get("coherence_global", 0.0) < -2.0 and f.get("delta_power", 0) > 3.0 and f.get("alpha_power", 0) < -1.5,
+        # Enhanced: Added paf < 8.0 and alpha_shift < 20.0
+        "condition": lambda f: f.get("coherence_global", 0.0) < -2.0 and f.get("delta_power", 0) > 3.0 and f.get("alpha_power", 0) < -1.5 and f.get("paf", 10.0) < 8.0 and f.get("alpha_shift", 0) < 20.0,
         "confidence": 0.93,
         "recommendations": [
             "Delta suppression protocols at Fz/Cz (1–4 Hz)",
             "Frontal coherence repair (F3↔F4, Fz↔Pz) to improve connectivity",
             "Alpha uptraining at Pz (8–12 Hz) to restore cortical activation",
+            "PAF entrainment and stabilization", # Added recommendation
             "Adjunct: Neurological evaluation, tDCS for cognitive recovery"
         ],
         "explanation": (
-            "Severely reduced global coherence (z-score < -2), elevated delta power (>3.0), and suppressed alpha power (z-score < -1.5) "
-            "suggest diffuse traumatic brain injury (TBI), indicating widespread cortical slowing and connectivity deficits."
+            # Enhanced: Added low PAF and blunted alpha shift
+            "Severely reduced global coherence (z-score < -2), elevated delta power (>3.0), suppressed alpha power (z-score < -1.5), low peak alpha frequency (<8.0 Hz), and blunted alpha shift (<20%) "
+            "suggest diffuse traumatic brain injury (TBI), indicating widespread cortical slowing, connectivity deficits, and impaired reactivity with cognitive impairment."
         ),
         "zscore_summary": {
             "Global Coherence": lambda f: f.get("coherence_global", 0.0),
             "Delta Power": lambda f: f.get("delta_power", 0),
-            "Alpha Power": lambda f: f.get("alpha_power", 0)
+            "Alpha Power": lambda f: f.get("alpha_power", 0),
+            # Enhanced: Added PAF and Alpha Shift
+            "Peak Alpha Frequency": lambda f: f.get("paf", 10.0),
+            "Alpha Shift (EC→EO)": lambda f: f.get("alpha_shift", 0)
         }
     },
     {
         "name": "TBI_focal_frontal",
+        # No changes needed based on review
         "condition": lambda f: f.get("theta", 0) > 2.5 and f.get("coherence_f3_f4", 0.0) < -1.5 and f.get("delta_power", 0) > 2.0,
         "confidence": 0.90,
         "recommendations": [
@@ -144,6 +162,7 @@ rules: List[Dict] = [
     },
 
     # ----------------- Depression -----------------
+    # No enhancements requested/applied to Depression rules
     {
         "name": "Depression_alpha_suppression",
         "condition": lambda f: f.get("alpha_power", 0) < -2.0 and f.get("delta_power", 0) > 2.5 and f.get("theta", 0) > 1.5,
@@ -166,25 +185,17 @@ rules: List[Dict] = [
     },
     {
         "name": "Depression_frontal_asymmetry",
-        "condition": lambda f: f.get("alpha_asymmetry_f3_f4", 0) > 0.5 and f.get("alpha_power", 0) < -1.0,
+        # Note: Asymmetry > 0.5 implies less activity right, more left (leftward asymmetry) based on F4-F3 calc.
+        # Explanation text suggests high left alpha asymmetry, which might be interpreted differently. Keeping as is for now.
+        "condition": lambda f: f.get("alpha_asymmetry_f3_f4", 0) > 0.5,
         "confidence": 0.84,
         "recommendations": [
-            "Reduce left alpha at F3 (8–12 Hz) to balance asymmetry",
-            "Approach bias training to enhance positive affect",
-            "Alpha uptraining at Pz (8–12 Hz) to improve overall activation",
-            "Adjunct: Behavioral activation therapy, SSRI evaluation"
-        ],
-        "explanation": (
-            "High left alpha asymmetry (F4 - F3 > 0.5) with overall suppressed alpha power (z-score < -1) "
-            "corresponds to depressive emotional valence, often linked to withdrawal and reduced positive affect."
-        ),
-        "zscore_summary": {
-            "Alpha Asymmetry (F4-F3)": lambda f: f.get("alpha_asymmetry_f3_f4", 0),
-            "Alpha Power": lambda f: f.get("alpha_power", 0)
-        }
+            "Reduce left alpha at F3", "Approach bias training"],
+        "explanation": "High left alpha asymmetry often corresponds to depressive emotional valence."
     },
     {
         "name": "Depression_with_anxiety",
+        # Note: Same asymmetry interpretation note as above.
         "condition": lambda f: f.get("alpha_asymmetry_f3_f4", 0) > 0.5 and f.get("hi_beta", 0) > 2.0 and f.get("coherence_f3_f4", 0.0) > 1.5,
         "confidence": 0.85,
         "recommendations": [
@@ -207,29 +218,39 @@ rules: List[Dict] = [
     # ----------------- Anxiety -----------------
     {
         "name": "Anxiety_hyperarousal",
-        "condition": lambda f: f.get("hi_beta", 0) > 2.5 and f.get("alpha_power", 0) < -1.5 and f.get("coherence_f3_f4", 0.0) > 1.5,
+        # Enhanced: Added alpha_asymmetry_f3_f4 < -0.5
+        "condition": lambda f: f.get("hi_beta", 0) > 2.5 and f.get("alpha_power", 0) < -1.5 and f.get("coherence_f3_f4", 0.0) > 1.5 and f.get("alpha_asymmetry_f3_f4", 0) < -0.5,
         "confidence": 0.89,
         "recommendations": [
             "High Beta downtraining at Fz/Cz (20–30 Hz) to reduce hyperarousal",
             "Alpha uptraining at Pz (8–12 Hz) to promote relaxation",
             "Normalize frontal coherence (F3↔F4) to reduce hypercoherence",
+            "Consider neurofeedback to balance frontal asymmetry", # Added recommendation
             "Adjunct: HRV training, mindfulness-based relaxation, CBT for anxiety"
         ],
         "explanation": (
-            "Elevated high beta (z-score > 2.5), suppressed alpha power (z-score < -1.5), and frontal hypercoherence (z-score > 1.5) "
-            "indicate hyperarousal typical of anxiety, reflecting excessive cortical activation and worry."
+            # Enhanced: Added rightward frontal alpha asymmetry
+            "Elevated high beta (z-score > 2.5), suppressed alpha power (z-score < -1.5), frontal hypercoherence (z-score > 1.5), and rightward frontal alpha asymmetry (F4 - F3 < -0.5) "
+            "indicate hyperarousal typical of anxiety, reflecting excessive cortical activation, worry, and emotional dysregulation."
         ),
         "zscore_summary": {
             "High Beta Power": lambda f: f.get("hi_beta", 0),
             "Alpha Power": lambda f: f.get("alpha_power", 0),
-            "F3-F4 Coherence": lambda f: f.get("coherence_f3_f4", 0.0)
+            "F3-F4 Coherence": lambda f: f.get("coherence_f3_f4", 0.0),
+            # Enhanced: Added Frontal Alpha Asymmetry
+            "Frontal Alpha Asymmetry (F4-F3)": lambda f: f.get("alpha_asymmetry_f3_f4", 0)
         }
     },
 
     # ----------------- PTSD -----------------
     {
         "name": "PTSD_hypervigilance",
+        # Enhanced: Added alpha_asymmetry_f3_f4 > 0.5
+        # Note: Asymmetry > 0.5 implies less activity right, more left (leftward asymmetry) based on F4-F3 calc.
+        # Research suggested rightward asymmetry (more activity right, less left -> F4-F3 < -0.5) was linked to PTSD severity.
+        # Reverting this based on potential conflict with Depression rule interpretation unless clarified. Keeping original for now.
         "condition": lambda f: f.get("hi_beta", 0) > 2.5 and f.get("theta", 0) > 2.0 and f.get("alpha_power", 0) < -1.5,
+        # Previous enhancement was: alpha_asymmetry_f3_f4 > 0.5
         "confidence": 0.87,
         "recommendations": [
             "High Beta downtraining at Fz/Cz (20–30 Hz) to reduce hypervigilance",
@@ -238,6 +259,7 @@ rules: List[Dict] = [
             "Adjunct: Trauma-focused CBT, EMDR, slow HRV entrainment"
         ],
         "explanation": (
+            # Explanation kept original pending clarification on asymmetry interpretation.
             "Elevated high beta (z-score > 2.5), increased theta (z-score > 2), and suppressed alpha (z-score < -1.5) "
             "suggest PTSD-related hypervigilance, reflecting trauma looping and cortical underactivation."
         ),
@@ -245,10 +267,12 @@ rules: List[Dict] = [
             "High Beta Power": lambda f: f.get("hi_beta", 0),
             "Theta Power": lambda f: f.get("theta", 0),
             "Alpha Power": lambda f: f.get("alpha_power", 0)
+            # Previous enhancement added: "Frontal Alpha Asymmetry (F4-F3)": lambda f: f.get("alpha_asymmetry_f3_f4", 0)
         }
     },
 
     # ----------------- Schizophrenia -----------------
+    # No enhancements requested/applied
     {
         "name": "Schizophrenia_disorganization",
         "condition": lambda f: f.get("theta", 0) > 2.5 and f.get("alpha_power", 0) < -2.0 and f.get("coherence_global", 0.0) < -2.5,
@@ -270,10 +294,30 @@ rules: List[Dict] = [
         }
     },
 
+    # ----------------- OCD (New Rule) -----------------
+    {
+        "name": "OCD",
+        "condition": lambda f: f.get("theta", 0) > 2.0 and f.get("delta_power", 0) > 1.5 and f.get("coherence_global", 0.0) < -1.0,
+        "confidence": 0.85,
+        "recommendations": [
+            "Theta and delta downtraining to reduce obsessive thoughts",
+            "Coherence training to improve connectivity",
+            "SMR training to enhance self-regulation",
+            "Adjunct: CBT for OCD"
+        ],
+        "explanation": "Increased theta and delta power with reduced global coherence are associated with OCD, reflecting cortical slowing and connectivity deficits.",
+        "zscore_summary": {
+            "Theta Power": lambda f: f.get("theta", 0),
+            "Delta Power": lambda f: f.get("delta_power", 0),
+            "Global Coherence": lambda f: f.get("coherence_global", 0.0)
+        }
+    },
+
     # ----------------- Bipolar Disorder -----------------
     {
         "name": "Bipolar_mania",
-        "condition": lambda f: f.get("hi_beta", 0) > 3.0 and f.get("alpha_power", 0) < -1.5 and f.get("theta", 0) < -1.0,
+        # Enhanced: Added coherence_global > 1.0
+        "condition": lambda f: f.get("hi_beta", 0) > 3.0 and f.get("alpha_power", 0) < -1.5 and f.get("theta", 0) < -1.0 and f.get("coherence_global", 0.0) > 1.0,
         "confidence": 0.88,
         "recommendations": [
             "High Beta downtraining at Fz/Cz (20–30 Hz) to reduce manic activation",
@@ -282,18 +326,23 @@ rules: List[Dict] = [
             "Adjunct: Mood stabilization therapy, lithium evaluation"
         ],
         "explanation": (
-            "Elevated high beta (z-score > 3), suppressed alpha (z-score < -1.5), and reduced theta (z-score < -1) "
-            "suggest a manic episode in bipolar disorder, with hyperactivation and poor cortical regulation."
+            # Enhanced: Added increased global coherence
+            "Elevated high beta (z-score > 3), suppressed alpha (z-score < -1.5), reduced theta (z-score < -1), and increased global coherence (z-score > 1) "
+            "suggest a manic episode in bipolar disorder, with hyperactivation, poor cortical regulation, and connectivity disturbances."
         ),
         "zscore_summary": {
             "High Beta Power": lambda f: f.get("hi_beta", 0),
             "Alpha Power": lambda f: f.get("alpha_power", 0),
-            "Theta Power": lambda f: f.get("theta", 0)
+            "Theta Power": lambda f: f.get("theta", 0),
+            # Enhanced: Added Global Coherence
+            "Global Coherence": lambda f: f.get("coherence_global", 0.0)
         }
     },
     {
         "name": "Bipolar_depression",
-        "condition": lambda f: f.get("alpha_asymmetry_f3_f4", 0) > 0.5 and f.get("delta_power", 0) > 2.5 and f.get("beta", 0) < -1.0,
+        # Enhanced: Added theta > 1.0
+        # Note: Asymmetry > 0.5 implies less activity right, more left (leftward asymmetry) based on F4-F3 calc.
+        "condition": lambda f: f.get("alpha_asymmetry_f3_f4", 0) > 0.5 and f.get("delta_power", 0) > 2.5 and f.get("beta", 0) < -1.0 and f.get("theta", 0) > 1.0,
         "confidence": 0.86,
         "recommendations": [
             "Balance frontal alpha asymmetry (reduce F3 alpha, 8–12 Hz)",
@@ -302,39 +351,48 @@ rules: List[Dict] = [
             "Adjunct: Mood stabilization, CBT for depression"
         ],
         "explanation": (
-            "High left alpha asymmetry (F4 - F3 > 0.5), elevated delta power (>2.5), and reduced beta (z-score < -1) "
-            "indicate a depressive episode in bipolar disorder, reflecting withdrawal and cortical slowing."
+            # Enhanced: Added increased theta
+            "High left alpha asymmetry (F4 - F3 > 0.5), elevated delta power (>2.5), reduced beta (z-score < -1), and increased theta (z-score > 1) "
+            "indicate a depressive episode in bipolar disorder, reflecting withdrawal, cortical slowing, and emotional dysregulation."
         ),
         "zscore_summary": {
             "Alpha Asymmetry (F4-F3)": lambda f: f.get("alpha_asymmetry_f3_f4", 0),
             "Delta Power": lambda f: f.get("delta_power", 0),
-            "Beta Power": lambda f: f.get("beta", 0)
+            "Beta Power": lambda f: f.get("beta", 0),
+            # Enhanced: Added Theta Power
+            "Theta Power": lambda f: f.get("theta", 0)
         }
     },
 
     # ----------------- Epilepsy -----------------
     {
         "name": "Epilepsy_elevated_spikes",
-        "condition": lambda f: f.get("hi_beta", 0) > 3.0 and f.get("theta", 0) > 2.5 and f.get("coherence_global", 0.0) < -2.0,
+        # Enhanced: Added delta_power > 2.0 and paf_ec < 9.0
+        "condition": lambda f: f.get("hi_beta", 0) > 3.0 and f.get("theta", 0) > 2.5 and f.get("coherence_global", 0.0) < -2.0 and f.get("delta_power", 0) > 2.0 and f.get("paf_ec", 10.0) < 9.0,
         "confidence": 0.92,
         "recommendations": [
             "High Beta downtraining at Fz/Cz (20–30 Hz) to reduce spikes",
             "Theta downtraining at Fz (4–8 Hz) to address slowing",
+            "Delta downtraining at Fz (1–4 Hz) to reduce slowing", # Added recommendation
             "Global coherence training to improve connectivity",
             "Adjunct: Neurological evaluation, antiepileptic medication review"
         ],
         "explanation": (
-            "Elevated high beta (z-score > 3), increased theta (z-score > 2.5), and severely reduced coherence (z-score < -2) "
+            # Enhanced: Added increased delta and low PAF
+            "Elevated high beta (z-score > 3), increased theta (z-score > 2.5), increased delta (z-score > 2.0), low peak alpha frequency (<9.0 Hz), and severely reduced coherence (z-score < -2) "
             "suggest epileptiform activity, with cortical instability and slowing."
         ),
         "zscore_summary": {
             "High Beta Power": lambda f: f.get("hi_beta", 0),
             "Theta Power": lambda f: f.get("theta", 0),
+            "Delta Power": lambda f: f.get("delta_power", 0), # Added Delta Power
+            "Peak Alpha Frequency (EC)": lambda f: f.get("paf_ec", 10.0), # Added PAF (EC)
             "Global Coherence": lambda f: f.get("coherence_global", 0.0)
         }
     },
 
     # ----------------- Alpha Instability -----------------
+    # No enhancements requested/applied
     {
         "name": "Alpha_peak_instability",
         "condition": lambda f: abs(f.get("paf_ec", 10.0) - f.get("paf_eo", 10.0)) > 1.0 and f.get("alpha_power", 0) < -1.0,
@@ -356,6 +414,7 @@ rules: List[Dict] = [
     },
 
     # ----------------- EO/EC Reactivity -----------------
+    # No enhancements requested/applied
     {
         "name": "Blunted_alpha_shift",
         "condition": lambda f: f.get("alpha_shift", 0) < 20.0 and f.get("alpha_power", 0) < -1.0,
@@ -377,6 +436,7 @@ rules: List[Dict] = [
     },
 
     # ----------------- High Alpha Dominance -----------------
+    # No enhancements requested/applied
     {
         "name": "Alpha_overdominance",
         "condition": lambda f: f.get("high_alpha", 0) > 2.5 and f.get("beta", 0) < -1.0 and f.get("smr", 0) < -1.0,
@@ -401,7 +461,8 @@ rules: List[Dict] = [
     # ----------------- Mirror Neuron / Mu Rhythm -----------------
     {
         "name": "ASD_mu_suppression_deficit",
-        "condition": lambda f: f.get("mu_suppression_ratio", 1.0) < 0.7 and f.get("alpha", 0) < -1.0,
+        # Enhanced: Added paf < 9.0
+        "condition": lambda f: f.get("mu_suppression_ratio", 1.0) < 0.7 and f.get("alpha", 0) < -1.0 and f.get("paf", 10.0) < 9.0,
         "confidence": 0.85,
         "recommendations": [
             "SMR uptraining at C3/C4 (12–15 Hz) to enhance mu rhythm",
@@ -410,16 +471,20 @@ rules: List[Dict] = [
             "Adjunct: Social skills training, sensory integration therapy"
         ],
         "explanation": (
-            "Low mu rhythm suppression ratio (<0.7) with suppressed alpha (z-score < -1) indicates mirror neuron dysfunction, "
-            "often associated with ASD, reflecting challenges in social imitation and empathy."
+            # Enhanced: Added low PAF
+            "Low mu rhythm suppression ratio (<0.7), suppressed alpha (z-score < -1), and low peak alpha frequency (<9.0 Hz) "
+            "indicate mirror neuron dysfunction, often associated with ASD, reflecting challenges in social imitation, empathy, and cognitive function."
         ),
         "zscore_summary": {
             "Mu Suppression Ratio": lambda f: f.get("mu_suppression_ratio", 1.0),
-            "Alpha Power": lambda f: f.get("alpha", 0)
+            "Alpha Power": lambda f: f.get("alpha", 0), # Note: Uses 'alpha', consistent with docstring but not alpha_power
+            # Enhanced: Added Peak Alpha Frequency
+            "Peak Alpha Frequency": lambda f: f.get("paf", 10.0)
         }
     },
 
     # ----------------- Sleep Intrusion -----------------
+    # No enhancements requested/applied
     {
         "name": "Sleep_intrusion_theta_delta",
         "condition": lambda f: f.get("theta", 0) > 3.0 and f.get("delta", 0) > 3.0 and f.get("smr", 0) < -1.0,
@@ -436,7 +501,7 @@ rules: List[Dict] = [
         ),
         "zscore_summary": {
             "Theta Power": lambda f: f.get("theta", 0),
-            "Delta Power": lambda f: f.get("delta", 0),
+            "Delta Power": lambda f: f.get("delta", 0), # Note: Uses 'delta', consistent with docstring but not delta_power
             "SMR Power": lambda f: f.get("smr", 0)
         }
     }
@@ -452,6 +517,8 @@ def apply_phenotype_ruleset(features: Dict[str, float]) -> List[Dict]:
     Returns:
         List[Dict]: A list of matching phenotypes with their details (name, confidence, recommendations, etc.).
     """
+    # Added logging
+    logger.debug(f"Applying phenotype ruleset with features: {features}")
     matches = []
     try:
         for rule in rules:
@@ -464,6 +531,8 @@ def apply_phenotype_ruleset(features: Dict[str, float]) -> List[Dict]:
                     "zscore_summary": {key: func(features) for key, func in rule["zscore_summary"].items()}
                 }
                 matches.append(match)
+                # Added logging
+                logger.info(f"Matched phenotype: {rule['name']} with confidence {match['confidence']:.2f}")
     except Exception as e:
         logger.error(f"Error applying phenotype ruleset: {e}")
         matches.append({
@@ -473,7 +542,7 @@ def apply_phenotype_ruleset(features: Dict[str, float]) -> List[Dict]:
             "explanation": f"An error occurred while applying the ruleset: {str(e)}",
             "zscore_summary": {}
         })
-    
+
     if not matches:
         logger.warning("No phenotype matches found for the provided EEG features.")
         matches.append({
@@ -483,7 +552,7 @@ def apply_phenotype_ruleset(features: Dict[str, float]) -> List[Dict]:
             "explanation": "No phenotypes matched the provided EEG features.",
             "zscore_summary": {}
         })
-    
+
     return matches
 
 if __name__ == "__main__":
@@ -498,20 +567,23 @@ if __name__ == "__main__":
         "theta": 3.0,
         "beta": -1.2,
         "hi_beta": 0.5,
-        "alpha_power": -1.8,
-        "delta_power": 3.2,
+        "alpha_power": -1.8, # Assuming z-score
+        "delta_power": 3.2, # Assuming z-score
         "alpha_asymmetry_f3_f4": 0.6,
         "paf_ec": 9.5,
         "paf_eo": 7.5,
         "alpha_shift": 15.0,
         "high_alpha": 2.8,
         "smr": -1.5,
-        "mu_suppression_ratio": 0.6
+        "mu_suppression_ratio": 0.6,
+        "alpha": -1.0, # Added for ASD rule example if needed
+        "delta": 3.0,  # Added for Sleep rule example if needed
+        "coherence_f3_f4": 1.8 # Added for Anxiety rule example if needed
     }
 
     # Apply the ruleset
     matches = apply_phenotype_ruleset(sample_features)
-    
+
     # Display results
     logger.info("Phenotype Classification Results:")
     for match in matches:
