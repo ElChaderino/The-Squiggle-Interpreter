@@ -31,6 +31,31 @@ from scipy.signal import coherence, welch, hilbert
 import matplotlib.pyplot as plt
 import nolds
 from antropy import sample_entropy, spectral_entropy, lziv_complexity
+import logging
+from pathlib import Path
+from . import plotting
+import time
+import multiprocessing as mp
+import sys
+import os
+
+# Simple local implementation for now if utils not created
+def execute_task(func, args):
+    try:
+        return func(*args)
+    except Exception as e:
+        logging.error(f"Error in task {func.__name__}: {e}", exc_info=True)
+        return None
+
+def execute_task_with_queue(func, args, queue):
+    try:
+        result = func(*args)
+        queue.put(result)
+    except Exception as e:
+        logging.error(f"Error executing {func.__name__} in queue task: {e}", exc_info=True)
+        queue.put(f"ERROR: {e}")
+
+logger = logging.getLogger(__name__)
 
 # Define standard frequency bands.
 BANDS = {
@@ -219,9 +244,10 @@ def compute_robust_zscore(power, norm_median, norm_mad):
     return (power - norm_median) / norm_mad
 
 def compute_all_zscore_maps(raw, norm_stats_dict, epoch_len_sec=2.0):
-    """
-    Compute robust z-score maps for each frequency band.
+    """Compute robust z-score maps for each frequency band.
     
+    If norm_stats_dict is None, computes z-scores relative to the current data's median/MAD.
+
     Parameters:
       raw (mne.io.Raw): Raw EEG data.
       norm_stats_dict (dict): Normative statistics for each band.
@@ -235,9 +261,25 @@ def compute_all_zscore_maps(raw, norm_stats_dict, epoch_len_sec=2.0):
     zscore_maps = {}
     for band, band_range in BANDS.items():
         band_powers = [compute_band_power(data[i], sfreq, band_range) for i in range(data.shape[0])]
-        stats = norm_stats_dict.get(band, {"median": np.median(band_powers),
-                                             "mad": np.median(np.abs(band_powers - np.median(band_powers)))})
-        z_scores = [compute_robust_zscore(p, stats["median"], stats["mad"]) for p in band_powers]
+        
+        # Handle the case where pre-computed norms are not provided
+        if norm_stats_dict is None:
+            # Calculate median and MAD from the current data's band powers
+            current_median = np.median(band_powers)
+            current_mad = np.median(np.abs(band_powers - current_median))
+            stats = {"median": current_median, "mad": current_mad}
+        else:
+            # Use pre-computed norms, falling back to current data if band missing
+            stats = norm_stats_dict.get(band, {
+                "median": np.median(band_powers),
+                "mad": np.median(np.abs(band_powers - np.median(band_powers)))
+            })
+            
+        # Ensure MAD is not zero to avoid division by zero
+        if stats["mad"] == 0:
+            stats["mad"] = 1e-6 # Use a small value instead of zero
+            
+        z_scores = [(p - stats["median"]) / stats["mad"] for p in band_powers]
         zscore_maps[band] = z_scores
     return zscore_maps
 
@@ -504,6 +546,213 @@ def compute_source_localization(evoked, inv_op, lambda2=1.0/9.0, method="sLORETA
     Returns:
       mne.SourceEstimate: The source estimate.
     """
-    stc = mne.minimum_norm.apply_inverse(evoked, inv_op, lambda2=lambda2,
-                                         method=method, pick_ori=None, verbose=False)
-    return stc
+    try:
+         stc = mne.minimum_norm.apply_inverse(evoked, inv_op, lambda2=lambda2, method=method, pick_ori=None, verbose=False)
+         return stc
+    except Exception as e:
+         logger.error(f"Error applying inverse solution with method {method}: {e}")
+         return None
+
+# --- Moved Helper from main.py ---
+def compute_source_for_band(cond, raw_data, inv_op, band, folders, source_methods, subjects_dir):
+    """Computes and saves source estimates for a specific band.
+
+    Called in parallel by run_source_localization_analysis.
+    Needs access to BANDS, compute_source_localization, plotting.plot_source_estimate.
+
+    Returns:
+        list[tuple[str, str, str, str]]: List of (cond, band, method, rel_filename)
+    """
+    results_for_band = []
+    try:
+        logger.info(f"    Computing sources for: {cond} - {band}")
+        band_range = BANDS[band]
+        raw_band = raw_data.copy().filter(band_range[0], band_range[1], verbose=False)
+        events = mne.make_fixed_length_events(raw_band, duration=2.0)
+        if len(events) < 1:
+             logging.warning(f"    Skipping {cond}-{band}: Not enough events after filtering.")
+             return []
+        epochs = mne.Epochs(raw_band, events, tmin=-0.1, tmax=0.4, baseline=(None, 0), preload=True, verbose=False)
+        if len(epochs) < 1:
+            logging.warning(f"    Skipping {cond}-{band}: No valid epochs created.")
+            return []
+        evoked = epochs.average()
+
+        subject_folder = Path(folders["subject"]) 
+        cond_folder = Path(folders["plots_src"]) / cond 
+        cond_folder.mkdir(parents=True, exist_ok=True)
+
+        for method, method_label in source_methods.items():
+            try:
+                stc = compute_source_localization(evoked, inv_op, method=method_label) 
+                if stc is None: 
+                     logger.warning(f"    STC computation failed for {cond}-{band}-{method}. Skipping plot.")
+                     continue
+
+                try:
+                     fig_src = plotting.plot_source_estimate(stc, view="lateral", time_point=0.1, subjects_dir=subjects_dir)
+                     if fig_src:
+                          src_filename = f"source_{cond}_{method}_{band}.png"
+                          src_path = cond_folder / src_filename
+                          fig_src.savefig(str(src_path), dpi=150, facecolor='black') 
+                          plt.close(fig_src)
+                          rel_path = str(src_path.relative_to(subject_folder))
+                          results_for_band.append((cond, band, method, rel_path))
+                     else:
+                          logger.warning(f"    Plotting failed for {cond}-{band}-{method}, no figure returned.")
+                          
+                except Exception as plot_e:
+                     logger.error(f"    Error plotting source for {cond}-{band}-{method}: {plot_e}", exc_info=True)
+                     if 'fig_src' in locals() and isinstance(fig_src, plt.Figure):
+                          plt.close(fig_src)
+
+            except Exception as compute_e:
+                logger.error(f"    Error computing source localization for {cond}-{band} with {method}: {compute_e}", exc_info=True)
+
+    except Exception as band_e:
+         logger.error(f"    Error processing band {band} for {cond} in source localization: {band_e}", exc_info=True)
+
+    return results_for_band
+
+# --- New Orchestration Function --- 
+def run_source_localization_analysis(raw_eo, raw_ec, folders, band_list, num_workers=None) -> dict:
+    """Orchestrates source localization analysis.
+
+    Sets up necessary MNE components (fsaverage, BEM, forward, inverse)
+    and runs source computation for each band in parallel.
+
+    Args:
+        raw_eo (mne.io.Raw | None): Eyes open data.
+        raw_ec (mne.io.Raw | None): Eyes closed data.
+        folders (dict): Dictionary of output folder paths (must include 'subject' and 'plots_src').
+        band_list (list[str]): List of frequency band names to analyze.
+        num_workers (int, optional): Number of workers for parallel processing. Defaults to cpu count.
+
+    Returns:
+        dict: Dictionary containing relative paths to the generated source plot images,
+              structured as {condition: {band: {method: rel_path}}}.
+    """
+    logger.info("--- Starting Source Localization Analysis ---")
+    source_loc_start_time = time.time()
+    source_localization_results = {"EO": {}, "EC": {}}
+    source_methods = {"LORETA": "MNE", "sLORETA": "sLORETA", "eLORETA": "eLORETA"}
+    n_workers = num_workers if num_workers else mp.cpu_count()
+
+    if raw_eo is None and raw_ec is None:
+        logger.warning("  Skipping source localization: No EO or EC data available.")
+        return source_localization_results
+
+    subjects_dir, src, bem_solution = None, None, None
+    fwd_eo, fwd_ec = None, None
+    inv_op_eo, inv_op_ec = None, None
+    cov_common = None
+    setup_successful = True
+
+    try:
+        logger.info("  Fetching fsaverage data...")
+        fs_dir = mne.datasets.fetch_fsaverage(verbose=False)
+        subjects_dir = os.path.dirname(fs_dir)
+        subject_fs = "fsaverage"
+
+        logger.info("  Setting up source space...")
+        src = mne.setup_source_space(subject_fs, spacing="oct6", subjects_dir=subjects_dir, add_dist=False, verbose=False)
+        logger.info("  Setting up BEM model...")
+        conductivity = (0.3, 0.006, 0.3)
+        bem_model = mne.make_bem_model(subject=subject_fs, ico=4, conductivity=conductivity, subjects_dir=subjects_dir, verbose=False)
+        bem_solution = mne.make_bem_solution(bem_model, verbose=False)
+
+        if raw_eo:
+            logger.info("  Computing covariance from EO data...")
+            events_eo = mne.make_fixed_length_events(raw_eo, duration=2.0)
+            epochs_eo = mne.Epochs(raw_eo, events_eo, tmin=-0.1, tmax=0.4, baseline=(None, 0), preload=True, verbose=False)
+            cov_common = mne.compute_covariance(epochs_eo, tmax=0., method="empirical", verbose=False)
+
+        if raw_eo:
+            logger.info("  Preparing EO forward solution...")
+            fwd_eo = mne.make_forward_solution(raw_eo.info, trans="fsaverage", src=src, bem=bem_solution, eeg=True, meg=False, verbose=False)
+        if raw_ec:
+            logger.info("  Preparing EC forward solution...")
+            fwd_ec = mne.make_forward_solution(raw_ec.info, trans="fsaverage", src=src, bem=bem_solution, eeg=True, meg=False, verbose=False)
+
+        if raw_eo and fwd_eo and cov_common:
+            logger.info("  Preparing EO inverse operator...")
+            inv_op_eo = compute_inverse_operator(raw_eo, fwd_eo, cov_common)
+        if raw_ec and fwd_ec:
+            if cov_common:
+                logger.info("  Preparing EC inverse operator (using EO covariance)...")
+                inv_op_ec = compute_inverse_operator(raw_ec, fwd_ec, cov_common)
+            else:
+                logger.warning("  Cannot prepare EC inverse operator: No suitable covariance available.")
+
+    except Exception as e_setup:
+        logger.error(f"  ❌ Error during MNE setup for source localization: {e_setup}", exc_info=True)
+        setup_successful = False
+
+    if not setup_successful:
+         logger.warning("Skipping source localization due to setup errors.")
+         return source_localization_results
+
+    tasks = []
+    result_keys = []
+    logger.info("  Preparing parallel source computation tasks...")
+    for cond, raw_data, inv_op in [("EO", raw_eo, inv_op_eo), ("EC", raw_ec, inv_op_ec)]:
+        if raw_data is None or inv_op is None:
+            logger.info(f"  Skipping source computation for {cond}: Missing data or inverse operator.")
+            continue
+        for band in band_list:
+            args = (cond, raw_data, inv_op, band, folders, source_methods, subjects_dir)
+            tasks.append((compute_source_for_band, args, f"source_{cond}_{band}"))
+
+    if not tasks:
+         logger.warning("  No source computation tasks defined after setup.")
+         return source_localization_results
+
+    logger.info(f"  🚀 Starting {len(tasks)} parallel source computation tasks using {n_workers} workers...")
+    parallel_start_time = time.time()
+    computed_results_list = []
+    try:
+        with mp.Pool(processes=n_workers) as pool:
+            async_results_src = []
+            temp_result_keys_src = []
+
+            for func, args, key in tasks:
+                temp_result_keys_src.append(key)
+                res = pool.apply_async(execute_task, args=(func, args))
+                async_results_src.append(res)
+            
+            pool.close()
+            
+            timeout_seconds_src = 600
+            for i, res in enumerate(async_results_src):
+                key = temp_result_keys_src[i]
+                try:
+                    result_list = res.get(timeout=timeout_seconds_src)
+                    if result_list is not None:
+                        computed_results_list.extend(result_list)
+                        logger.info(f"    ✅ Task '{key}' completed.")
+                    else:
+                         logger.warning(f"    ⚠️ Task '{key}' failed (returned None). Check logs.")
+                except mp.TimeoutError:
+                    logger.error(f"    ❌ Task '{key}' timed out after {timeout_seconds_src}s.")
+                except Exception as e:
+                    logger.error(f"    ❌ Task '{key}' failed with error: {e}", exc_info=True)
+            
+            pool.join()
+            
+    except Exception as pool_e_src:
+        logger.error(f"Source localization multiprocessing pool error: {pool_e_src}", exc_info=True)
+
+    parallel_end_time = time.time()
+    logger.info(f"  Source computation finished in {parallel_end_time - parallel_start_time:.2f}s")
+
+    for cond, band, method, rel_filename in computed_results_list:
+        if cond not in source_localization_results:
+             source_localization_results[cond] = {}
+        if band not in source_localization_results[cond]:
+             source_localization_results[cond][band] = {}
+        source_localization_results[cond][band][method] = rel_filename
+
+    source_loc_end_time = time.time()
+    logger.info(f"--- Source Localization Analysis finished in {source_loc_end_time - source_loc_start_time:.2f}s ---")
+
+    return source_localization_results

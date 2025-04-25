@@ -1,4 +1,11 @@
 import numpy as np
+import logging
+from pathlib import Path
+from .feature_extraction import extract_classification_features # Assuming feature_extraction is in the same 'modules' dir
+import time
+
+# Setup logger for this module
+logger = logging.getLogger(__name__)
 
 
 def classify_eeg_profile(features, verbose=False):
@@ -111,3 +118,97 @@ def classify_eeg_profile(features, verbose=False):
         "recommendations": recommendations,
         "explanations": explanations if verbose else None
     }
+
+# --- New Orchestration Function --- 
+def run_phenotype_analysis(raw_eo, subject_folder: Path, subject: str, 
+                           raw_ec=None, csd_raw_eo=None, 
+                           sloreta_data=None, vigilance_states=None) -> dict | None:
+    """Extracts features, classifies EEG phenotype, and saves results.
+
+    Args:
+        raw_eo (mne.io.Raw): Raw EEG data for Eyes Open condition.
+        subject_folder (Path): Path object for the subject's output directory.
+        subject (str): Subject identifier.
+        raw_ec (mne.io.Raw, optional): Raw EEG data for Eyes Closed condition.
+        csd_raw_eo (mne.io.Raw, optional): CSD-transformed EO data.
+        sloreta_data (dict, optional): Dictionary containing sLORETA source data.
+        vigilance_states (list, optional): List of computed vigilance states.
+
+    Returns:
+        dict | None: Dictionary containing phenotype classification results, 
+                     or None if processing fails.
+    """
+    logger.info(f"--- Starting Phenotype Analysis for Subject: {subject} ---")
+    start_time = time.time() # Need to import time
+
+    if raw_eo is None:
+        logger.warning("Skipping phenotype analysis: EO data is None.")
+        return None
+
+    phenotype_results = None
+    try:
+        # 1. Extract Features
+        logger.info("  Extracting features for classification...")
+        features = extract_classification_features(
+            raw=raw_eo,
+            vigilance_sequence=vigilance_states, # Pass if available
+            eyes_open_raw=raw_eo,
+            eyes_closed_raw=raw_ec,
+            csd_raw=csd_raw_eo, # Pass CSD EO if available
+            sloreta_data=sloreta_data # Pass sLORETA if available
+        )
+        logger.debug(f"  Extracted features: {list(features.keys())}")
+
+        # 2. Classify Profile
+        logger.info("  Classifying EEG profile...")
+        # Pass verbose=True if detailed explanations are desired in the output dict
+        phenotype_results = classify_eeg_profile(features, verbose=True)
+        logger.info(f"  Phenotype classification completed. Best match: {phenotype_results.get('best_match')}")
+
+        # 3. Save Results to File
+        # Use the dedicated phenotype plot/data directory if available, otherwise subject_folder
+        # Assuming 'folders' dict passed to process_subject has 'plots_phenotype'
+        # This function only receives subject_folder, so we save there directly.
+        phenotype_report_path = subject_folder / f"{subject}_phenotype_results.txt"
+        try:
+            with open(phenotype_report_path, "w", encoding="utf-8") as f:
+                f.write(f"Phenotype Classification Results for Subject: {subject}\n")
+                f.write("==================================================\n")
+                if phenotype_results:
+                    f.write(f"Best Match: {phenotype_results.get('best_match', 'N/A')}\n")
+                    f.write(f"Confidence: {phenotype_results.get('confidence', 'N/A'):.2f}\n\n")
+                    if phenotype_results.get('recommendations'):
+                        f.write("Recommendations:\n")
+                        for rec in phenotype_results['recommendations']:
+                            f.write(f"- {rec}\n")
+                        f.write("\n")
+                    if phenotype_results.get('explanations'):
+                         f.write("Explanations:\n")
+                         for exp in phenotype_results['explanations']:
+                              f.write(f"- {exp}\n")
+                         f.write("\n")
+                    if phenotype_results.get('zscore_summary'):
+                         f.write("Z-Score Summary:\n")
+                         for key, value in phenotype_results['zscore_summary'].items():
+                              # Format value nicely, handle None
+                              f_val = f"{value:.2f}" if isinstance(value, (int, float)) else str(value)
+                              f.write(f"- {key}: {f_val}\n")
+                else:
+                    f.write("No classification results generated.\n")
+            logger.info(f"  Saved phenotype results to: {phenotype_report_path}")
+        except IOError as e_io:
+            logger.error(f"  Error saving phenotype results file to {phenotype_report_path}: {e_io}")
+        except Exception as e_save:
+             logger.error(f"  Unexpected error saving phenotype results: {e_save}", exc_info=True)
+
+
+    except ImportError:
+         logger.error("  Skipping phenotype analysis: Missing dependency for feature_extraction.")
+         return None
+    except Exception as e:
+        logger.error(f"  Error during phenotype analysis for subject {subject}: {e}", exc_info=True)
+        return None # Return None on failure
+
+    end_time = time.time()
+    logger.info(f"--- Phenotype Analysis for Subject: {subject} finished in {end_time - start_time:.2f}s ---")
+    return phenotype_results # Return computed results dict

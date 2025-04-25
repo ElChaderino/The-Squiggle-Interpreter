@@ -13,6 +13,7 @@ from . import pdf_report_builder
 import re
 from . import pyramid_model
 from modules.io_utils import load_eeg_data as load_data
+import logging
 
 BANDS = {
     "Delta": (1, 4),
@@ -654,6 +655,22 @@ def plot_topomap_abs_rel(
     normalize: bool = False,
     show_ch_names: bool = True
 ) -> None:
+    """Plot absolute and relative power topomaps side-by-side, optionally adding instability."""
+    logger_cr = logging.getLogger(__name__) # Use specific logger if desired
+
+    logger_cr.debug(f"plot_topomap_abs_rel called for {cond_name} - {band_name}. Instability provided: {instability_vals is not None}")
+    if instability_vals is not None:
+        # Ensure instability_vals is a numpy array for stats
+        instability_vals_arr = np.asarray(instability_vals)
+        logger_cr.debug(f"  Instability values (first 5): {instability_vals_arr[:5]}")
+        if instability_vals_arr.size > 0:
+             try:
+                 logger_cr.debug(f"  Instability stats: min={np.nanmin(instability_vals_arr):.2e}, max={np.nanmax(instability_vals_arr):.2e}, mean={np.nanmean(instability_vals_arr):.2e}")
+             except Exception as e_stat:
+                  logger_cr.warning(f"Could not compute stats for instability values: {e_stat}")
+        else:
+             logger_cr.debug("  Instability values array is empty.")
+
     info = raw.info
     montage = mne.channels.make_standard_montage("standard_1020")
     raw_temp = mne.io.RawArray(np.zeros((len(info["ch_names"]), 1)), info)
@@ -760,7 +777,7 @@ def plot_topomap_abs_rel(
         cbar_inst = plt.colorbar(im_inst, ax=ax_inst, orientation="horizontal", fraction=0.05, pad=0.08)
         cbar_inst.set_label("Variance (µV²)" if not normalize else "Normalized", color="white")
         cbar_inst.ax.tick_params(colors="white")
-    fig.suptitle(f"Topomaps (Abs, Rel, Instability) - {band_name} ({cond_name})", color="white", fontsize=12)
+    fig.suptitle(f"Topomaps (Abs, Rel{', Instability' if instability_subset is not None else ''}) - {band_name} ({cond_name})", color="white", fontsize=12)
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="black")

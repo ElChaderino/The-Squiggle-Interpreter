@@ -102,6 +102,93 @@ def process_edf_to_csv(edf_path, epoch_length, output_csv):
     print(f"CSV file saved to {output_csv}")
 
 
+# --- New function to save pre-computed features --- 
+def save_computed_features_to_csv(features: dict, info: mne.Info | None, output_csv: str) -> None:
+    """Saves a dictionary of pre-computed features to a CSV file.
+
+    Assumes features dictionary might contain nested structures like band powers per channel.
+    Flattens the structure for CSV output.
+
+    Args:
+        features (dict): Dictionary containing computed features. 
+                         Expected keys like 'band_powers_eo', 'zscores_eo', etc.
+                         Values under these keys might be dicts mapping channel to band power dict,
+                         or band to list of zscores.
+        info (mne.Info | None): MNE Info object to get channel names if needed.
+        output_csv (str): Path to the output CSV file.
+    """
+    rows = []
+    ch_names = info.ch_names if info else []
+
+    # --- Process Band Powers (Example: EO) ---
+    bp_eo = features.get("band_powers_eo")
+    if bp_eo and isinstance(bp_eo, dict):
+        for ch, band_data in bp_eo.items():
+            if isinstance(band_data, dict):
+                 row = {"Subject_Feature": f"{ch}_EO_Power"}
+                 row.update(band_data) # Add {band: power} pairs
+                 rows.append(row)
+
+    # --- Process Band Powers (Example: EC) ---
+    bp_ec = features.get("band_powers_ec")
+    if bp_ec and isinstance(bp_ec, dict):
+        for ch, band_data in bp_ec.items():
+             if isinstance(band_data, dict):
+                 row = {"Subject_Feature": f"{ch}_EC_Power"}
+                 row.update(band_data)
+                 rows.append(row)
+
+    # --- Process Z-Scores (Example: EO) ---
+    zscores_eo = features.get("zscores_eo")
+    if zscores_eo and isinstance(zscores_eo, dict):
+        for band, z_list in zscores_eo.items():
+            if isinstance(z_list, list) and len(z_list) == len(ch_names):
+                 # Save z-scores per channel for this band
+                 for i, ch in enumerate(ch_names):
+                      row = {"Subject_Feature": f"{ch}_EO_ZScore_{band}", "Value": z_list[i]}
+                      rows.append(row)
+            else:
+                 # Save average z-score if list format doesn't match channels
+                 try:
+                     avg_z = np.nanmean(z_list) if isinstance(z_list, list) else np.nan
+                     row = {"Subject_Feature": f"Avg_EO_ZScore_{band}", "Value": avg_z}
+                     rows.append(row)
+                 except Exception:
+                     pass # Ignore errors if averaging fails
+
+    # --- Process Z-Scores (Example: EC) ---
+    # (Add similar logic for zscores_ec if needed)
+    
+    # --- Add other features as needed --- 
+    # Example: Single value features
+    # if features.get('some_single_value'):
+    #    rows.append({"Subject_Feature": "Some_Single_Value", "Value": features['some_single_value']})
+
+    if not rows:
+        print(f"No features processed for CSV export to {output_csv}. Skipping file creation.")
+        return
+
+    try:
+        df = pd.DataFrame(rows)
+        # Reorder columns nicely if possible
+        cols = df.columns.tolist()
+        if "Subject_Feature" in cols:
+            cols.insert(0, cols.pop(cols.index("Subject_Feature")))
+        if "Value" in cols: # For single value features
+             cols.insert(1, cols.pop(cols.index("Value")))
+        # Put band columns after Value if they exist
+        band_cols = [b for b in BANDS if b in cols]
+        for band in reversed(band_cols):
+            if band in cols: # Check again as it might have been moved
+                cols.insert(2, cols.pop(cols.index(band)))
+                
+        df = df[cols]
+        df.to_csv(output_csv, index=False, na_rep='NaN')
+        print(f"Computed features saved to {output_csv}")
+    except Exception as e:
+        print(f"Error saving computed features to CSV {output_csv}: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Process an EDF file and export channel metrics per epoch to CSV"
