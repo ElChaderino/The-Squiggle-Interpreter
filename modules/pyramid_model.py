@@ -21,20 +21,20 @@ Ensure this file is saved with UTF-8 encoding to display emojis (🟢, 🟡, �
 """
 
 import logging
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, List, Tuple, Optional, Union, Any
 import numpy as np
 from pathlib import Path
+import mne
+from scipy.stats import zscore
 
 # --- Optional Imports for Vigilance ---
 # These are only strictly needed if using the vigilance functions.
 # Wrap in try/except for environments where MNE/Matplotlib might not be installed.
 try:
-    import mne
     import matplotlib.pyplot as plt
     from matplotlib.patches import Patch # Specifically needed for legend
     VIGILANCE_ENABLED = True
 except ImportError:
-    mne = None
     plt = None
     Patch = None # No need for Patch if plt failed
     VIGILANCE_ENABLED = False
@@ -1192,6 +1192,260 @@ def map_to_pyramid(
         mappings.append("No pyramid mappings generated: Check input data or logs.")
 
     return mappings
+
+
+class PyramidModel:
+    """
+    Implements the EEG Pyramid Model for hierarchical analysis of EEG data.
+    The pyramid has multiple levels, from basic signal quality to advanced cognitive metrics.
+    """
+    
+    def __init__(self):
+        self.levels = {
+            'Level 1': 'Signal Quality',
+            'Level 2': 'Basic Metrics',
+            'Level 3': 'Spectral Analysis',
+            'Level 4': 'Network Dynamics',
+            'Level 5': 'Clinical Patterns'
+        }
+        
+        self.frequency_bands = {
+            'Delta': (1, 4),
+            'Theta': (4, 8),
+            'Alpha': (8, 13),
+            'Beta': (13, 30),
+            'Gamma': (30, 45)
+        }
+        
+        self.quality_thresholds = {
+            'noise_threshold': 100,  # μV
+            'min_alpha_power': 0.1,  # μV²
+            'max_line_noise': 10,    # μV
+            'max_dc_offset': 100     # μV
+        }
+        
+    def analyze_all_levels(self, raw_ec: mne.io.Raw, raw_eo: mne.io.Raw, 
+                          powers_ec: Dict, powers_eo: Dict) -> Dict[str, Dict]:
+        """
+        Analyze all pyramid levels for both EC and EO conditions.
+        
+        Args:
+            raw_ec: Raw EEG data for eyes closed condition
+            raw_eo: Raw EEG data for eyes open condition
+            powers_ec: Band powers for eyes closed condition
+            powers_eo: Band powers for eyes open condition
+            
+        Returns:
+            Dictionary containing analysis results for each level
+        """
+        results = {}
+        
+        # Level 1: Signal Quality
+        results['Level 1'] = self._analyze_signal_quality(raw_ec, raw_eo)
+        
+        # Level 2: Basic Metrics
+        results['Level 2'] = self._analyze_basic_metrics(raw_ec, raw_eo)
+        
+        # Level 3: Spectral Analysis
+        results['Level 3'] = self._analyze_spectral_patterns(powers_ec, powers_eo)
+        
+        # Level 4: Network Dynamics
+        results['Level 4'] = self._analyze_network_dynamics(raw_ec, raw_eo)
+        
+        # Level 5: Clinical Patterns
+        results['Level 5'] = self._analyze_clinical_patterns(powers_ec, powers_eo)
+        
+        return results
+    
+    def _analyze_signal_quality(self, raw_ec: mne.io.Raw, raw_eo: mne.io.Raw) -> Dict:
+        """Analyze basic signal quality metrics."""
+        results = {
+            'status': 'pass',
+            'findings': [],
+            'metrics': {}
+        }
+        
+        for condition, raw in [('EC', raw_ec), ('EO', raw_eo)]:
+            data = raw.get_data()
+            
+            # Check for flat signals
+            flat_channels = []
+            for i, ch in enumerate(raw.ch_names):
+                if np.std(data[i]) < 0.1:
+                    flat_channels.append(ch)
+            
+            if flat_channels:
+                results['findings'].append(f"Flat signals detected in {condition}: {', '.join(flat_channels)}")
+                results['status'] = 'warning'
+            
+            # Check for excessive noise
+            noisy_channels = []
+            for i, ch in enumerate(raw.ch_names):
+                if np.std(data[i]) > self.quality_thresholds['noise_threshold']:
+                    noisy_channels.append(ch)
+            
+            if noisy_channels:
+                results['findings'].append(f"Excessive noise in {condition}: {', '.join(noisy_channels)}")
+                results['status'] = 'warning'
+            
+            # Store metrics
+            results['metrics'][f'{condition}_mean_amplitude'] = np.mean(np.abs(data))
+            results['metrics'][f'{condition}_std_amplitude'] = np.mean(np.std(data, axis=1))
+        
+        return results
+    
+    def _analyze_basic_metrics(self, raw_ec: mne.io.Raw, raw_eo: mne.io.Raw) -> Dict:
+        """Analyze basic EEG metrics."""
+        results = {
+            'status': 'normal',
+            'findings': [],
+            'metrics': {}
+        }
+        
+        for condition, raw in [('EC', raw_ec), ('EO', raw_eo)]:
+            data = raw.get_data()
+            
+            # Compute basic statistics
+            mean_amp = np.mean(np.abs(data))
+            peak_amp = np.max(np.abs(data))
+            variance = np.var(data)
+            
+            results['metrics'][f'{condition}_mean_amplitude'] = float(mean_amp)
+            results['metrics'][f'{condition}_peak_amplitude'] = float(peak_amp)
+            results['metrics'][f'{condition}_variance'] = float(variance)
+            
+            # Check for abnormal values
+            if peak_amp > 200:  # μV
+                results['findings'].append(f"High amplitude peaks in {condition}")
+                results['status'] = 'attention'
+            
+            if variance > 1000:  # μV²
+                results['findings'].append(f"High variance in {condition}")
+                results['status'] = 'attention'
+        
+        return results
+    
+    def _analyze_spectral_patterns(self, powers_ec: Dict, powers_eo: Dict) -> Dict:
+        """Analyze spectral patterns and relationships."""
+        results = {
+            'status': 'normal',
+            'findings': [],
+            'metrics': {}
+        }
+        
+        for condition, powers in [('EC', powers_ec), ('EO', powers_eo)]:
+            for ch in powers:
+                # Compute band ratios
+                if 'Theta' in powers[ch] and 'Beta' in powers[ch] and powers[ch]['Beta'] != 0:
+                    theta_beta = powers[ch]['Theta'] / powers[ch]['Beta']
+                    results['metrics'][f'{ch}_{condition}_theta_beta'] = theta_beta
+                    
+                    if theta_beta > 3:
+                        results['findings'].append(f"High theta/beta ratio in {ch} ({condition})")
+                        results['status'] = 'attention'
+                
+                # Check alpha dominance in posterior channels
+                if ch in ['O1', 'O2', 'P3', 'P4'] and 'Alpha' in powers[ch]:
+                    total_power = sum(powers[ch].values())
+                    if total_power > 0:
+                        alpha_percent = powers[ch]['Alpha'] / total_power * 100
+                        results['metrics'][f'{ch}_{condition}_alpha_percent'] = alpha_percent
+                        
+                        if condition == 'EC' and alpha_percent < 30:
+                            results['findings'].append(f"Low alpha dominance in {ch} (EC)")
+                            results['status'] = 'attention'
+        
+        return results
+    
+    def _analyze_network_dynamics(self, raw_ec: mne.io.Raw, raw_eo: mne.io.Raw) -> Dict:
+        """Analyze network dynamics and connectivity patterns."""
+        results = {
+            'status': 'normal',
+            'findings': [],
+            'metrics': {},
+            'recommendations': []
+        }
+        
+        # Analyze frontal asymmetry
+        frontal_pairs = [('F3', 'F4'), ('F7', 'F8')]
+        for pair in frontal_pairs:
+            left, right = pair
+            if left in raw_eo.ch_names and right in raw_eo.ch_names:
+                left_data = raw_eo.get_data(picks=[left])[0]
+                right_data = raw_eo.get_data(picks=[right])[0]
+                
+                asymmetry = np.log(np.var(right_data) / np.var(left_data))
+                results['metrics'][f'asymmetry_{left}_{right}'] = float(asymmetry)
+                
+                if abs(asymmetry) > 0.5:
+                    results['findings'].append(f"Notable asymmetry between {left}-{right}")
+                    results['status'] = 'attention'
+                    results['recommendations'].append(
+                        f"Consider asymmetry training for {left}-{right}"
+                    )
+        
+        return results
+    
+    def _analyze_clinical_patterns(self, powers_ec: Dict, powers_eo: Dict) -> Dict:
+        """Analyze patterns associated with clinical conditions."""
+        results = {
+            'status': 'normal',
+            'findings': [],
+            'metrics': {},
+            'recommendations': []
+        }
+        
+        # ADHD pattern detection
+        for condition, powers in [('EC', powers_ec), ('EO', powers_eo)]:
+            for ch in ['CZ', 'FZ', 'FCZ']:
+                if ch in powers:
+                    if 'Theta' in powers[ch] and 'Beta' in powers[ch] and powers[ch]['Beta'] != 0:
+                        theta_beta = powers[ch]['Theta'] / powers[ch]['Beta']
+                        if theta_beta > 3:
+                            results['findings'].append(
+                                f"Elevated theta/beta ratio in {ch} ({condition})"
+                            )
+                            results['recommendations'].append(
+                                f"Consider SMR/beta training at {ch}"
+                            )
+                            results['status'] = 'attention'
+        
+        # Anxiety pattern detection
+        high_beta_sites = []
+        for condition, powers in [('EC', powers_ec), ('EO', powers_eo)]:
+            for ch in powers:
+                if 'Beta' in powers[ch]:
+                    total_power = sum(powers[ch].values())
+                    if total_power > 0:
+                        beta_percent = powers[ch]['Beta'] / total_power * 100
+                        if beta_percent > 30:
+                            high_beta_sites.append(ch)
+        
+        if high_beta_sites:
+            results['findings'].append(
+                f"Elevated beta activity in: {', '.join(high_beta_sites)}"
+            )
+            results['recommendations'].append(
+                "Consider alpha/theta training for anxiety reduction"
+            )
+            results['status'] = 'attention'
+        
+        return results
+    
+    def get_overall_assessment(self) -> Dict[str, Any]:
+        """
+        Generate an overall assessment based on all pyramid levels.
+        
+        Returns:
+            Dictionary containing summary and recommendations
+        """
+        return {
+            'summary': "Overall assessment will be generated based on all pyramid levels",
+            'recommendations': [
+                "Specific recommendations will be based on findings from each level",
+                "Training protocols will be suggested based on detected patterns"
+            ]
+        }
 
 
 if __name__ == "__main__":

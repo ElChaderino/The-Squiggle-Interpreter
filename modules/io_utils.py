@@ -195,39 +195,73 @@ def load_eeg_data(file_path: str, lpf_freq: float | None = None, notch_freq: flo
 
 # --- Utility: Group EDF Files by Subject ---
 def find_subject_edf_files(directory: str) -> dict:
-    """Finds top-level EDF files and groups them by subject ID and EO/EC condition."""
-    # List only .edf files directly under the input directory
+    """
+    Finds top-level EDF files and groups them by subject ID and EO/EC condition.
+    Handles case-insensitive EO/EC designations and provides robust naming logic.
+
+    Args:
+        directory (str): Path to directory containing EDF files.
+
+    Returns:
+        dict: {subject_id: {'EO': str|None, 'EC': str|None}, ...}
+              Only includes subjects with at least one valid EO or EC file.
+    """
+    # List only .edf files (case-insensitive) directly under the input directory
     edf_files = [f for f in os.listdir(directory) if f.lower().endswith('.edf')]
     subjects: dict[str, dict[str, str | None]] = {}
+    condition_patterns = [
+        (r'\beo\b', 'EO'),  # Matches 'eo' (case-insensitive) as a word
+        (r'\bec\b', 'EC'),  # Matches 'ec' (case-insensitive) as a word
+    ]
+
     for fname in edf_files:
         stem = Path(fname).stem
-        low = stem.lower().strip()
-        # Attempt to extract subject ID (digits or alphanumeric prefix)
-        m_id = re.match(r'^(\d+)', low)
-        if not m_id:
-            m_id = re.match(r'^([a-zA-Z0-9]+)', low)
+        low_stem = stem.lower().strip()
+
+        # Extract subject ID (digits or alphanumeric prefix)
+        m_id = re.match(r'^(\d+)', low_stem) or re.match(r'^([a-z0-9]+)', low_stem)
         if not m_id:
             print(f"⚠️ Cannot extract subject ID from '{fname}'; skipping.")
             continue
         sid = m_id.group(1).upper()
         subjects.setdefault(sid, {'EO': None, 'EC': None})
-        # Determine EO vs. EC via word-boundary tokens
-        if re.search(r'\bec\b', low):
-            if subjects[sid]['EC'] is None:
-                subjects[sid]['EC'] = fname
+
+        # Check for EO/EC conditions (case-insensitive)
+        matched = False
+        for pattern, condition in condition_patterns:
+            if re.search(pattern, low_stem, re.IGNORECASE):
+                if subjects[sid][condition] is None:
+                    subjects[sid][condition] = fname
+                    print(f"Assigned '{fname}' as {condition} for subject {sid}")
+                else:
+                    print(f"⚠️ Multiple {condition} files for {sid}; keeping first: {subjects[sid][condition]}")
+                matched = True
+                break
+
+        # Future-proof fallback: handle ambiguous or misnamed files
+        if not matched:
+            # Check for partial matches or alternative naming (e.g., 'eyesopen', 'eyesclosed')
+            if 'eyesopen' in low_stem or 'open' in low_stem:
+                condition = 'EO'
+            elif 'eyesclosed' in low_stem or 'closed' in low_stem:
+                condition = 'EC'
             else:
-                print(f"⚠️ Multiple EC for {sid}; keeping first: {subjects[sid]['EC']}")
-            continue
-        if re.search(r'\beo\b', low):
-            if subjects[sid]['EO'] is None:
-                subjects[sid]['EO'] = fname
+                print(f"⚠️ '{fname}' lacks clear EO/EC designation; skipping.")
+                continue
+
+            if subjects[sid][condition] is None:
+                subjects[sid][condition] = fname
+                print(f"Assigned '{fname}' as {condition} (fallback) for subject {sid}")
             else:
-                print(f"⚠️ Multiple EO for {sid}; keeping first: {subjects[sid]['EO']}")
-            continue
-        # No clear condition found
-        print(f"⚠️ '{fname}' lacks EO/EC designation; skipping.")
-    # Return only subjects with at least one file assigned
-    return {sid: {'EO': rec.get('EO'), 'EC': rec.get('EC')} for sid, rec in subjects.items() if rec.get('EO') or rec.get('EC')}
+                print(f"⚠️ Multiple {condition} files for {sid}; keeping first: {subjects[sid][condition]}")
+
+    # Filter subjects with at least one valid file
+    valid_subjects = {
+        sid: rec for sid, rec in subjects.items()
+        if rec.get('EO') or rec.get('EC')
+    }
+    print(f"Found {len(valid_subjects)} subjects with valid EDF files")
+    return valid_subjects
 
 
 def setup_output_directories(project_dir: str, subject: str) -> dict:

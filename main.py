@@ -10,7 +10,7 @@ import io
 import signal
 from pathlib import Path
 import mne
-from modules import clinical_report, pyramid_model, data_to_csv, phenotype
+from modules import clinical_report, pyramid_model, data_to_csv, phenotype, pdf_report_builder
 from modules.phenotype import classify_eeg_profile
 from modules.vigilance import plot_vigilance_hypnogram
 # Updated module imports - ensure processing and plotting are imported
@@ -391,20 +391,91 @@ def generate_reports(raw_eo, raw_ec, folders, subject_folder, subject, band_list
              report.build_html_report(report_data, str(html_report_path))
              print(f"  ✅ Generated HTML report: {html_report_path}")
 
-             # --- PDF Conversion (Optional) ---
-             # Check config if PDF generation is desired
-             # if config.get('generate_pdf', False):
-             #     try:
-             #         print(f"  Attempting PDF conversion to: {pdf_report_path}")
-             #         report.convert_html_to_pdf(str(html_report_path), str(pdf_report_path))
-             #         print(f"  ✅ Converted HTML to PDF: {pdf_report_path}")
-             #     except Exception as e_pdf:
-             #         print(f"  ❌ Error converting report to PDF for {subject}: {e_pdf}")
-             print("  ℹ️ PDF conversion placeholder/skipped.")
+             # --- PDF Report Generation ---
+             try:
+                 print(f"  Attempting to generate PDF report at: {pdf_report_path}")
+                 # Extract required data for PDF report
+                 band_powers = {
+                     "EO": computation_results.get("band_powers_eo", {}),
+                     "EC": computation_results.get("band_powers_ec", {})
+                 }
+                 
+                 # Fix: Correctly extract instability indices from computation results
+                 instability_results = computation_results.get("instability_results", {})
+                 instability_indices = {
+                     "EO": instability_results.get('indices', {}).get('EO', {}),
+                     "EC": instability_results.get('indices', {}).get('EC', {})
+                 }
+                 
+                 source_localization = computation_results.get("source_localization", {})
+                 
+                 vigilance_plots = {}
+                 if "hypnograms" in report_data and "strips" in report_data:
+                     for condition in ["EO", "EC"]:
+                         if condition in report_data.get("hypnograms", {}) and condition in report_data.get("strips", {}):
+                             hypno_path = report_data["hypnograms"][condition]
+                             strip_path = report_data["strips"][condition]
+                             if isinstance(hypno_path, str) and isinstance(strip_path, str):
+                                 vigilance_plots[condition] = {
+                                     "hypnogram": str(Path(subject_folder) / hypno_path),
+                                     "strip": str(Path(subject_folder) / strip_path)
+                                 }
+                 
+                 channels = report_data.get('site_list', [])
+                 
+                 coherence = {
+                     "EO": computation_results.get("coherence_eo", {}),
+                     "EC": computation_results.get("coherence_ec", {})
+                 }
+                 
+                 zscores = {
+                     "EO": computation_results.get("zscores_eo", {}),
+                     "EC": computation_results.get("zscores_ec", {})
+                 }
+                 
+                 connectivity = {
+                     "EO": computation_results.get("connectivity_eo", {}),
+                     "EC": computation_results.get("connectivity_ec", {})
+                 }
+                 
+                 site_metrics = computation_results.get("site_metrics", {})
+
+                 # Create output directory for PDF report if it doesn't exist
+                 pdf_report_dir = pdf_report_path.parent
+                 pdf_report_dir.mkdir(parents=True, exist_ok=True)
+                 
+                 # Generate the PDF report
+                 pdf_report_builder.build_pdf_report(
+                     report_output_dir=pdf_report_dir,
+                     band_powers=band_powers,
+                     instability_indices=instability_indices,
+                     source_localization=source_localization,
+                     vigilance_plots=vigilance_plots,
+                     channels=channels,
+                     coherence=coherence,
+                     zscores=zscores,
+                     connectivity=connectivity,
+                     site_metrics=site_metrics
+                 )
+                 print(f"  ✅ Generated PDF report: {pdf_report_path}")
+             except Exception as e_pdf:
+                 logging.error(f"  ❌ Error generating PDF report for {subject}: {e_pdf}", exc_info=True)
+
+             # Generate clinical report
+             try:
+                 print(f"  Attempting to generate clinical report...")
+                 clinical_report_results = clinical_report._generate_clinical_report(
+                     raw_ec=raw_ec,
+                     raw_eo=raw_eo,
+                     output_dir=str(folders["reports"]),
+                     channels=report_data.get('site_list', [])
+                 )
+                 print(f"  ✅ Generated clinical report")
+             except Exception as e_clinical:
+                 logging.error(f"  ❌ Error generating clinical report for {subject}: {e_clinical}", exc_info=True)
 
         except Exception as e:
-            # FIX: Use logging.error here, not print, to correctly handle exc_info
-            logging.error(f"  ❌ Error during main report generation for {subject}: {e}", exc_info=True)
+            logging.error(f"  ❌ Error during report generation for {subject}: {e}", exc_info=True)
 
     report_end_time = time.time()
     print(f"Report generation finished in {report_end_time - report_start_time:.2f}s")
@@ -516,6 +587,10 @@ def process_subject(subject, files, project_dir, config):
     tmin_tfr, tmax_tfr = config.get('tfr_tmin', 0.0), config.get('tfr_tmax', 4.0)
     if raw_eo: tasks.append((processing.compute_all_tfr_maps, (raw_eo, n_cycles_tfr, tmin_tfr, tmax_tfr), "tfr_eo"))
     if raw_ec: tasks.append((processing.compute_all_tfr_maps, (raw_ec, n_cycles_tfr, tmin_tfr, tmax_tfr), "tfr_ec"))
+
+    # Add instability index computation
+    if raw_eo and raw_ec:
+        tasks.append((clinical_report.compute_instability_index, (raw_ec, raw_eo), "instability_results"))
 
     # 5. ICA (Typically run on EO data)
     if raw_eo:
@@ -1013,18 +1088,12 @@ def process_subject(subject, files, project_dir, config):
     # --- Generate Clinical Interpretation Report --- #
     try:
         logging.info("📄 Generating Clinical Interpretation Report...")
-        # Assuming clinical_report._generate_clinical_report exists and takes these args
-        # Pass computation results which might contain coherence, zscores etc.
+        # Call clinical report generation with correct parameters
         clinical_report._generate_clinical_report(
-            raw_eo=raw_eo, # Pass original raw objects
+            raw_eo=raw_eo,
             raw_ec=raw_ec,
-            output_dir=subject_folder, # Save in subject's main output folder
-            channels=ch_names, # Pass channel names
-            source_localization=plot_filenames.get('source_localization'), # Pass computed source paths
-            coherence=computation_results, # Pass all results, function can pick coherence keys
-            zscores=computation_results,   # Pass all results, function can pick zscore keys
-            tfr=computation_results        # Pass all results, function can pick tfr keys
-            # Add other necessary data as required by the function
+            output_dir=subject_folder,
+            channels=ch_names
         )
         logging.info("  ✅ Clinical Interpretation Report generated.")
     except AttributeError:

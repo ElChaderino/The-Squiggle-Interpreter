@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import logging
 import time
+from typing import List, Dict, Any
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -23,6 +24,152 @@ VIGILANCE_COLORS = {
     'C': '#800080'  # purple (sleep onset markers)
 }
 
+VIGILANCE_PARAMS = {
+    "A1": {
+        "alpha_theta_ratio": 2.0,
+        "posterior_anterior_ratio": 1.5,
+        "alpha_stability": 0.8,
+        "min_alpha_power": 0.5,
+        "alpha_peak_frequency": 10.0,
+        "alpha_reactivity": 0.7,
+        "beta_alpha_ratio": 0.4,
+        "temporal_stability": 0.9,
+        "occipital_dominance": True
+    },
+    "A2": {
+        "alpha_theta_ratio": 1.5,
+        "posterior_anterior_ratio": 1.2,
+        "alpha_stability": 0.6,
+        "min_alpha_power": 0.4,
+        "alpha_peak_frequency": 9.5,
+        "alpha_reactivity": 0.5,
+        "beta_alpha_ratio": 0.5,
+        "temporal_stability": 0.8,
+        "occipital_dominance": True
+    },
+    "A3": {
+        "alpha_theta_ratio": 1.2,
+        "posterior_anterior_ratio": 1.0,
+        "alpha_stability": 0.5,
+        "min_alpha_power": 0.3,
+        "alpha_peak_frequency": 9.0,
+        "alpha_reactivity": 0.4,
+        "beta_alpha_ratio": 0.6,
+        "temporal_stability": 0.7,
+        "occipital_dominance": False
+    },
+    "B1": {
+        "alpha_theta_ratio": 0.9,
+        "posterior_anterior_ratio": 0.8,
+        "alpha_stability": 0.4,
+        "min_alpha_power": 0.2,
+        "theta_prominence": 0.3,
+        "alpha_peak_frequency": 8.5,
+        "alpha_reactivity": 0.3,
+        "beta_alpha_ratio": 0.7,
+        "temporal_stability": 0.6,
+        "vertex_sharp_waves": False
+    },
+    "B2/3": {
+        "alpha_theta_ratio": 0.6,
+        "posterior_anterior_ratio": 0.6,
+        "alpha_stability": 0.3,
+        "min_alpha_power": 0.1,
+        "theta_prominence": 0.5,
+        "delta_presence": 0.2,
+        "alpha_peak_frequency": 8.0,
+        "alpha_reactivity": 0.2,
+        "beta_alpha_ratio": 0.8,
+        "temporal_stability": 0.4,
+        "vertex_sharp_waves": True
+    },
+    "C": {
+        "alpha_theta_ratio": 0.3,
+        "posterior_anterior_ratio": 0.4,
+        "alpha_stability": 0.2,
+        "min_alpha_power": 0.05,
+        "theta_prominence": 0.7,
+        "delta_presence": 0.4,
+        "alpha_peak_frequency": 7.5,
+        "alpha_reactivity": 0.1,
+        "beta_alpha_ratio": 0.9,
+        "temporal_stability": 0.3,
+        "vertex_sharp_waves": True,
+        "sleep_spindles": False
+    }
+}
+
+VIGILANCE_TRANSITIONS = {
+    "A1": ["A2"],
+    "A2": ["A1", "A3"],
+    "A3": ["A2", "B1"],
+    "B1": ["A3", "B2/3"],
+    "B2/3": ["B1", "C"],
+    "C": ["B2/3"]
+}
+
+VIGILANCE_CHARACTERISTICS = {
+    "A1": {
+        "description": "Relaxed wakefulness with pronounced alpha activity",
+        "key_features": [
+            "Strong posterior alpha rhythm",
+            "High alpha stability",
+            "Strong alpha blocking response",
+            "Clear posterior-anterior gradient"
+        ],
+        "clinical_significance": "Optimal relaxed state, good cognitive processing"
+    },
+    "A2": {
+        "description": "Relaxed wakefulness with moderate alpha activity",
+        "key_features": [
+            "Moderate posterior alpha rhythm",
+            "Good alpha stability",
+            "Present alpha blocking",
+            "Visible posterior-anterior gradient"
+        ],
+        "clinical_significance": "Normal relaxed state, adequate cognitive processing"
+    },
+    "A3": {
+        "description": "Drowsy wakefulness with minimal alpha activity",
+        "key_features": [
+            "Reduced posterior alpha rhythm",
+            "Variable alpha stability",
+            "Weaker alpha blocking",
+            "Flattened posterior-anterior gradient"
+        ],
+        "clinical_significance": "Early drowsiness, reduced attention"
+    },
+    "B1": {
+        "description": "Light drowsiness with theta emergence",
+        "key_features": [
+            "Low voltage theta activity",
+            "Minimal alpha activity",
+            "Occasional vertex sharp waves",
+            "Increased temporal activity"
+        ],
+        "clinical_significance": "Drowsiness, impaired cognitive performance"
+    },
+    "B2/3": {
+        "description": "Advanced drowsiness with prominent theta",
+        "key_features": [
+            "Prominent theta activity",
+            "Vertex sharp waves",
+            "Occasional delta waves",
+            "Very low alpha activity"
+        ],
+        "clinical_significance": "Significant drowsiness, marked cognitive impairment"
+    },
+    "C": {
+        "description": "Light sleep onset",
+        "key_features": [
+            "Dominant theta activity",
+            "Prominent delta waves",
+            "Sleep spindles may appear",
+            "Complete loss of alpha rhythm"
+        ],
+        "clinical_significance": "Sleep onset, severe cognitive impairment"
+    }
+}
 
 def compute_band_power(epoch: np.ndarray, sfreq: float, band: tuple[float, float], channel_idx: int = 0, min_samples_for_filter: int = 256, filter_length_factor: float = 0.8) -> float:
     """
@@ -503,3 +650,177 @@ def run_vigilance_analysis(raw: mne.io.Raw | None, output_plot_dir: str | Path, 
     )
     # Note: The function currently doesn't return the computed states, only saves plots.
     # Modify return value if states are needed by the caller.
+
+def compute_spectral_features(epoch, sfreq):
+    """More comprehensive spectral analysis"""
+    features = {
+        # Core band powers
+        "alpha_power": compute_band_power(epoch, sfreq, (8, 12)),
+        "theta_power": compute_band_power(epoch, sfreq, (4, 8)),
+        "beta_power": compute_band_power(epoch, sfreq, (12, 30)),
+        
+        # Sub-band analysis
+        "low_alpha": compute_band_power(epoch, sfreq, (8, 10)),
+        "high_alpha": compute_band_power(epoch, sfreq, (10, 12)),
+        
+        # Stability metrics
+        "alpha_stability": compute_alpha_stability(epoch, sfreq),
+        "theta_prominence": compute_theta_prominence(epoch, sfreq)
+    }
+    return features
+
+def compute_alpha_stability(epoch, sfreq):
+    """Measure alpha rhythm stability"""
+    window_size = int(1.0 * sfreq)  # 1-second windows
+    windows = sliding_windows(epoch, window_size)
+    alpha_powers = [compute_band_power(w, sfreq, (8, 12)) for w in windows]
+    return np.std(alpha_powers) / np.mean(alpha_powers)  # Coefficient of variation
+
+def compute_theta_prominence(epoch, sfreq):
+    """Assess theta rhythm prominence"""
+    theta = compute_band_power(epoch, sfreq, (4, 8))
+    surrounding = compute_band_power(epoch, sfreq, (2, 12))
+    return theta / surrounding if surrounding > 0 else 0
+
+def enhanced_classify_epoch(epoch, sfreq, channel_idx=0):
+    """Multi-feature classification with confidence scores"""
+    features = compute_spectral_features(epoch[channel_idx], sfreq)
+    confidence_scores = {}
+    
+    for stage, params in VIGILANCE_PARAMS.items():
+        score = 0.0
+        # Weight different features
+        score += 0.4 * evaluate_ratio(features, params)
+        score += 0.3 * evaluate_stability(features, params)
+        score += 0.3 * evaluate_power(features, params)
+        confidence_scores[stage] = score
+    
+    return max(confidence_scores.items(), key=lambda x: x[1])[0]
+
+def compute_spatial_features(epoch, channel_info):
+    """Analyze spatial distribution of activity"""
+    return {
+        "anterior_posterior_ratio": compute_ap_ratio(epoch, channel_info),
+        "hemispheric_symmetry": compute_symmetry(epoch, channel_info),
+        "midline_coherence": compute_midline_coherence(epoch, channel_info)
+    }
+
+def get_vigilance_stage_metrics(eeg_data: np.ndarray, fs: float, channel_names: List[str]) -> Dict[str, float]:
+    """
+    Calculate metrics for vigilance stage classification.
+    
+    Args:
+        eeg_data: EEG data array (channels × samples)
+        fs: Sampling frequency
+        channel_names: List of channel names
+    
+    Returns:
+        Dictionary of vigilance-related metrics
+    """
+    metrics = {}
+    
+    # Get channel indices for different regions
+    posterior_channels = [i for i, ch in enumerate(channel_names) 
+                        if ch in ['O1', 'O2', 'P3', 'P4', 'PZ']]
+    anterior_channels = [i for i, ch in enumerate(channel_names) 
+                        if ch in ['FP1', 'FP2', 'F3', 'F4', 'FZ']]
+    
+    # Calculate band powers
+    def get_band_power(data, band):
+        fmin, fmax = band
+        freqs, psd = signal.welch(data, fs=fs, nperseg=int(fs*2))
+        band_mask = (freqs >= fmin) & (freqs <= fmax)
+        return np.mean(psd[band_mask])
+    
+    # Calculate metrics for each region
+    posterior_data = eeg_data[posterior_channels] if posterior_channels else None
+    anterior_data = eeg_data[anterior_channels] if anterior_channels else None
+    
+    if posterior_data is not None and anterior_data is not None:
+        # Alpha (8-13 Hz)
+        post_alpha = get_band_power(posterior_data, (8, 13))
+        ant_alpha = get_band_power(anterior_data, (8, 13))
+        metrics['posterior_anterior_ratio'] = post_alpha / (ant_alpha + 1e-10)
+        
+        # Theta (4-7 Hz)
+        post_theta = get_band_power(posterior_data, (4, 7))
+        metrics['alpha_theta_ratio'] = post_alpha / (post_theta + 1e-10)
+        
+        # Beta (13-30 Hz)
+        post_beta = get_band_power(posterior_data, (13, 30))
+        metrics['beta_alpha_ratio'] = post_beta / (post_alpha + 1e-10)
+        
+        # Calculate alpha stability
+        alpha_filtered = mne.filter.filter_data(
+            posterior_data, fs, 8, 13, verbose=False
+        )
+        alpha_env = np.abs(signal.hilbert(alpha_filtered))
+        metrics['alpha_stability'] = 1 - np.std(alpha_env) / np.mean(alpha_env)
+        
+        # Calculate alpha peak frequency
+        freqs, psd = signal.welch(posterior_data, fs=fs, nperseg=int(fs*2))
+        alpha_mask = (freqs >= 8) & (freqs <= 13)
+        alpha_peak = freqs[alpha_mask][np.argmax(psd[alpha_mask])]
+        metrics['alpha_peak_frequency'] = alpha_peak
+        
+    return metrics
+
+def classify_vigilance_stage(metrics: Dict[str, float]) -> str:
+    """
+    Classify vigilance stage based on calculated metrics.
+    
+    Args:
+        metrics: Dictionary of vigilance-related metrics
+    
+    Returns:
+        Classified vigilance stage
+    """
+    stage_scores = {}
+    
+    for stage, params in VIGILANCE_PARAMS.items():
+        score = 0
+        total_params = len(params)
+        
+        for param, threshold in params.items():
+            if param in metrics:
+                if isinstance(threshold, bool):
+                    score += 1 if metrics[param] == threshold else 0
+                else:
+                    ratio = metrics[param] / threshold
+                    if 0.8 <= ratio <= 1.2:  # Within 20% of threshold
+                        score += 1
+                    elif 0.6 <= ratio <= 1.4:  # Within 40% of threshold
+                        score += 0.5
+        
+        stage_scores[stage] = score / total_params
+    
+    # Return the stage with highest score
+    return max(stage_scores.items(), key=lambda x: x[1])[0]
+
+def analyze_vigilance_transitions(stages: List[str]) -> List[Dict[str, Any]]:
+    """
+    Analyze transitions between vigilance stages.
+    
+    Args:
+        stages: List of vigilance stages in sequence
+    
+    Returns:
+        List of transition events with metadata
+    """
+    transitions = []
+    
+    for i in range(1, len(stages)):
+        prev_stage = stages[i-1]
+        curr_stage = stages[i]
+        
+        if curr_stage != prev_stage:
+            transition = {
+                'from_stage': prev_stage,
+                'to_stage': curr_stage,
+                'time_point': i,
+                'valid': curr_stage in VIGILANCE_TRANSITIONS.get(prev_stage, []),
+                'significance': VIGILANCE_CHARACTERISTICS[curr_stage]['clinical_significance']
+            }
+            transitions.append(transition)
+    
+    return transitions
